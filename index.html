@@ -17,6 +17,7 @@
     --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
     --grid:#e1e0d9; --border:rgba(11,11,11,.10);
     --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
+    --s7:#7b5cd6; --s8:#7a5230; --s9:#12939f; --s10:#8a8880; --s11:#c9971f;
     --up:#d03b3b; --down:#1c5cab;              /* 红涨蓝跌 */
     --warn-bg:#fdf3e0; --warn-ink:#7a5200;
   }
@@ -27,6 +28,7 @@
       --ink-1:#fff; --ink-2:#c3c2b7; --ink-3:#898781;
       --grid:#2c2c2a; --border:rgba(255,255,255,.10);
       --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+      --s7:#9b7fe8; --s8:#a97b4a; --s9:#2fb3bf; --s10:#7d7b74; --s11:#d4af37;
       --up:#e66767; --down:#6da7ec;
       --warn-bg:#3a2e10; --warn-ink:#fab219;
     }
@@ -37,6 +39,7 @@
     --ink-1:#fff; --ink-2:#c3c2b7; --ink-3:#898781;
     --grid:#2c2c2a; --border:rgba(255,255,255,.10);
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+    --s7:#9b7fe8; --s8:#a97b4a; --s9:#2fb3bf; --s10:#7d7b74; --s11:#d4af37;
     --up:#e66767; --down:#6da7ec;
     --warn-bg:#3a2e10; --warn-ink:#fab219;
   }
@@ -107,6 +110,29 @@
   .scard svg { margin-top:8px; display:block; }
   .scard .vol { font-size:12px; color:var(--ink-3); margin-top:6px; }
   .scard .funds { font-size:12px; color:var(--ink-3); margin-top:4px; }
+
+  /* 持仓列表（天天基金风格，明细页） */
+  .hdate { float:right; font-weight:400; font-size:11px; color:var(--ink-3); }
+  .hold-sum { display:flex; justify-content:space-between; align-items:flex-end;
+    padding:2px 0 12px; }
+  .hold-sum .label { font-size:12px; color:var(--ink-3); }
+  .hold-sum .val { font-size:26px; font-weight:700; letter-spacing:-0.5px; }
+  .hold-head, .hrow { display:grid; grid-template-columns:minmax(0,1fr) 76px 70px 76px;
+    gap:8px; align-items:center; }
+  .hold-head { font-size:11px; color:var(--ink-3); padding:8px 0 6px;
+    border-bottom:1px solid var(--grid); }
+  .hold-head span:not(:first-child) { text-align:right; }
+  .hrow { padding:10px 0; border-bottom:1px solid var(--grid); }
+  .hrow:last-child { border-bottom:none; }
+  .hmain { min-width:0; }
+  .hname { font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; }
+  .hamt { font-size:12px; color:var(--ink-2); margin-top:2px; }
+  .hcol { text-align:right; font-size:14px; font-weight:600; min-width:0; }
+  .hcol .hsub { font-size:11px; font-weight:500; color:var(--ink-2); margin-top:2px; }
+  .hsec { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; }
+  .hempty { text-align:center; color:var(--ink-3); padding:24px 0; font-size:13px; }
 
   /* 走势 */
   details.tbl { margin-top:10px; }
@@ -180,6 +206,8 @@
     .sector-cards { grid-template-columns:1fr; }
     .donut-flex { justify-content:center; }
     .row2 { grid-template-columns:1fr; }
+    .hold-head, .hrow { grid-template-columns:minmax(0,1fr) 64px 56px 64px; gap:6px; }
+    .hcol { font-size:13px; }
   }
   @media (max-width:420px) { .kpis { grid-template-columns:1fr 1fr; } }
 
@@ -287,10 +315,12 @@
         </div>
         <div class="field"><label>基金名称（自动带出，可改）</label>
           <input id="nName" placeholder="查询后自动填入"></div>
-        <div class="field"><label>兜底大类（无A股重仓数据时归入，如黄金/QDII）</label>
+        <div class="field"><label>兜底板块（无A股重仓数据时归入，如黄金/QDII）</label>
           <select id="nFallback">
-            <option>其他</option><option>半导体·芯片</option><option>人工智能·算力</option>
-            <option>黄金</option><option>海外QDII</option><option>新能源·锂电</option>
+            <option>综合</option><option>信息技术</option><option>先进制造</option>
+            <option>消费</option><option>医药</option><option>金融</option>
+            <option>周期资源</option><option>基建地产</option>
+            <option>黄金</option><option>海外QDII</option>
           </select></div>
         <div class="field"><label>投入金额（元，只存本机，不上传）</label>
           <input id="nAmt" inputmode="decimal" placeholder="如 5000"></div>
@@ -336,6 +366,19 @@
   <!-- ============ 明细 ============ -->
   <section class="view" id="view-txn">
     <div class="card">
+      <h3>持仓列表 <span class="hdate" id="holdDate"></span></h3>
+      <div class="hold-sum">
+        <div><div class="label">账户资产</div>
+          <div class="val num" id="holdTotal">¥0</div></div>
+        <div style="text-align:right"><div class="label">当日收益</div>
+          <div class="val num" id="holdDay">—</div></div>
+      </div>
+      <div class="hold-head">
+        <span>基金 / 持有金额</span><span>当日收益</span><span>板块</span><span>近30天</span>
+      </div>
+      <div id="holdRows"></div>
+    </div>
+    <div class="card" style="margin-top:14px">
       <h3>我的基金 · 金额只存本机</h3>
       <table class="data" id="myFundsTable"></table>
     </div>
@@ -363,10 +406,12 @@
       <div class="row2">
         <div class="field"><label>API Key（只存本机）</label>
           <input id="sZkey" type="password" placeholder="粘贴智谱 APIKey"></div>
-        <div class="field"><label>模型</label>
-          <input id="sZmodel" value="glm-4.5v-flash" placeholder="glm-4.5v-flash"></div>
+        <div class="field"><label>模型（留空自动用免费视觉模型）</label>
+          <input id="sZmodel" value="glm-4.6v-flash" placeholder="glm-4.6v-flash"></div>
       </div>
-      <div class="hint">bigmodel.cn 控制台可生成 key；免费模型 flash 无资金风险。</div>
+      <div class="hint">bigmodel.cn 控制台可生成 key；免费模型 glm-4.6v-flash 无资金风险。
+        识别失败会显示具体原因（Key 无效 / 模型不可用等）。</div>
+      <button class="btn" id="btnZtest" style="margin-top:4px">🔍 测试识别连通</button>
     </div>
     <div class="card" style="margin-top:14px">
       <h3>数据备份（换手机用）</h3>
@@ -409,16 +454,45 @@
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const BUCKETS = ["半导体·芯片","人工智能·算力","黄金","海外QDII","新能源·锂电","其他"];
-const BUCKET_COLOR = {"半导体·芯片":"--s1","人工智能·算力":"--s2","黄金":"--s3",
-  "海外QDII":"--s4","新能源·锂电":"--s5","其他":"--s6"};
-const INDUSTRY_RULES = [   // 细分行业 → 大类（顺序匹配）
-  [/半导体|芯片|集成电路|存储|晶圆|封测|PCB|被动元件|分立器件|印制电路/, "半导体·芯片"],
-  [/软件|互联网|计算机|通信|云计算|IT服务|游戏|传媒|人工智能|算力|光模块|电子/, "人工智能·算力"],
+const BUCKETS = ["信息技术","先进制造","消费","医药","金融","周期资源","基建地产","综合","黄金","海外QDII"];
+const BUCKET_COLOR = {"信息技术":"--s1","先进制造":"--s2","消费":"--s3","医药":"--s5",
+  "金融":"--s7","周期资源":"--s8","基建地产":"--s9","综合":"--s10","黄金":"--s11","海外QDII":"--s6"};
+const INDUSTRY_RULES = [   // 申万细分行业 → 10大板块（顺序匹配，靠前者优先）
   [/贵金属|黄金|金银/, "黄金"],
-  [/海外/, "海外QDII"],
-  [/电池|光伏|风电|电源|锂|电网|电力|能源金属|新能源|储能/, "新能源·锂电"],
+  [/海外|港股|美股|纳斯达克|标普|日经|新兴市场|亚洲|全球/, "海外QDII"],
+  [/半导体|芯片|集成电路|元件|PCB|印制电路|被动元件|分立器件|电子化学品|光学光电子|消费电子|电子|光模块|通信|计算机|软件|互联网|云计算|IT服务|人工智能|算力|游戏|传媒|数字媒体|影视|出版|广告营销/, "信息技术"],
+  [/电池|光伏|风电|电源|电网|储能|电力设备|锂电|机械设备|自动化|机器人|军工|国防|航天|航空装备|汽车|乘用车|商用车|摩托车/, "先进制造"],
+  [/医药|医疗|生物|中药|制药|疫苗|CXO|医疗服务/, "医药"],
+  [/银行|证券|保险|信托|多元金融|金融/, "金融"],
+  [/钢铁|化工|化学|塑料|橡胶|化纤|有色|能源金属|小金属|工业金属|金属新材料|煤炭|石油|石化|炼化|油服|水泥|玻璃|建材|建筑材料|环保|肥料|农化/, "周期资源"],
+  [/房地产|建筑|装饰|交通运输|公路|铁路|航空|机场|港口|航运|物流|公用事业|电力|燃气|水务/, "基建地产"],
+  [/白酒|酿酒|啤酒|乳品|食品|饮料|调味|零食|保健品|家电|家用电器|照明|厨卫|美容护理|化妆品|个护|纺织|服装|服饰|商贸|零售|旅游|酒店|餐饮|教育|社会服务|轻工|造纸|包装|家居|农林牧渔|种植|养殖|饲料|渔业|宠物/, "消费"],
 ];
+function bucketOf(industry) {
+  for (const [re, b] of INDUSTRY_RULES) if (re.test(industry)) return b;
+  return "综合";
+}
+/* 无A股行业数据时的兜底板块：先按基金类型自动纠正（黄金/QDII），再取用户选的，最后综合 */
+function fundBucketFallback(code) {
+  const t = market?.funds?.[code]?.type || "";
+  if (/黄金|商品/.test(t)) return "黄金";
+  if (/QDII|国际|亚洲|全球|新兴|美国|纳斯达克|标普|日经/.test(t)) return "海外QDII";
+  return fundsCfg.find(f => f.code === code)?.fallback || "综合";
+}
+/* 某基金的主板块（占比最高的行业所归板块）+ 第一大细分行业 */
+function fundMainBucket(code) {
+  const inds = Object.entries(market?.funds?.[code]?.industries || {});
+  if (!inds.length) return {bucket: fundBucketFallback(code), sub: ""};
+  const agg = {};
+  let best = "综合", bv = -1;
+  for (const [ind, w] of inds) {
+    const b = bucketOf(ind);
+    agg[b] = (agg[b] || 0) + w;
+    if (agg[b] > bv) { bv = agg[b]; best = b; }
+  }
+  const top = inds.sort((a, b) => b[1] - a[1])[0][0];
+  return {bucket: best, sub: top};
+}
 function bucketOf(industry) {
   for (const [re, b] of INDUSTRY_RULES) if (re.test(industry)) return b;
   return "其他";
@@ -432,6 +506,7 @@ let txns    = lsGet(LS.txn, []);   // [{d, code, name, action, amount}]
 let settings= lsGet(LS.set, {});   // {repo, pat, zkey, zmodel}
 let market  = null;                // {updated_at, funds:{code:{name,type,industries,nav_history}}}
 let fundsCfg= [];                  // data/funds.json 的 {code, fallback}
+let live    = {};                  // 盘中实时：{code:{NAV,NAVCHGRT,PDATE,GSZ,GSZZL,GZTIME}}（东财估值接口）
 
 const $ = id => document.getElementById(id);
 const cssv = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -474,6 +549,34 @@ async function loadData() {
   renderDash();
 }
 
+/* ============ 盘中实时估值（天天基金App同源接口，CORS全开） ============
+   盘中 GSZZL=实时估值涨跌%；收盘后 GSZZL 变空、NAVCHGRT=官方净值涨跌%。 */
+function fundToday(code) {
+  const L = live[code];
+  if (L?.GSZZL != null && L.GSZZL !== "" && L.GSZZL !== "-")
+    return {pct:+L.GSZZL, src:"估值", date:(L.GZTIME||"").slice(5,10)};
+  if (L?.NAVCHGRT != null && L.NAVCHGRT !== "")
+    return {pct:+L.NAVCHGRT, src:"净值", date:(L.PDATE||"").slice(5,10)};
+  const nav = market?.funds?.[code]?.nav_history || [];
+  for (let i = nav.length - 1; i >= 0; i--)
+    if (nav[i].pct != null) return {pct:nav[i].pct, src:"净值", date:nav[i].d.slice(5)};
+  return null;
+}
+async function fetchLive() {
+  const codes = Object.keys(amounts).filter(c => amounts[c].amt > 0);
+  if (!codes.length) return;
+  try {
+    const r = await fetch("https://fundmobapi.eastmoney.com/FundMNewApi/FundMNFInfo"
+      + "?pageIndex=1&pageSize=200&plat=Iphone&appType=ttjj&product=EFund&Version=1&deviceid=1&FCODES="
+      + codes.join(","));
+    const j = await r.json();
+    for (const d of j?.Datas || []) live[d.FCODE] = d;
+    renderDash();
+    if (document.querySelector("#view-txn.on")) renderTxnView();
+  } catch {}   // 估值拉取失败静默降级为净值数据
+}
+setInterval(() => { if (document.visibilityState === "visible") fetchLive(); }, 60000);
+
 /* ================= 分析计算 ================= */
 function compute() {
   const out = { total:0, sectors:{}, todayPct:0, w30:0, mdd:0, mddDate:"",
@@ -492,7 +595,7 @@ function compute() {
         out.sectors[b].funds.add(c);
       }
     } else {
-      const fb = fundsCfg.find(f => f.code === c)?.fallback || "其他";
+      const fb = fundBucketFallback(c);
       out.sectors[fb] ??= {value:0, funds:new Set()};
       out.sectors[fb].value += amt;
       out.sectors[fb].funds.add(c);
@@ -556,13 +659,23 @@ function renderDash() {
   $("dashBody").classList.toggle("hide", !hasFund);
   if (!hasFund) { $("updBadge").textContent = market ? "更新于 " + (market.updated_at||"") : "无数据"; return; }
   const c = compute();
+  // 盘中实时校准今日涨跌（估值/最新净值优先于 Action 抓的净值序列）
+  let pSum = 0, pW = 0, srcLive = "";
+  let lastDate = "";
+  for (const c2 of Object.keys(c.perFund)) {
+    const t = fundToday(c2); if (!t) continue;
+    pSum += c.perFund[c2].amt * t.pct / 100; pW += c.perFund[c2].amt;
+    if (t.src === "估值") srcLive = "盘中估值 · 实时";
+    if (t.date > lastDate) lastDate = t.date;
+  }
+  if (pW > 0) c.todayPct = pSum / pW * 100;
   $("updBadge").textContent = market ? "更新于 " + (market.updated_at||"") : "无数据（缓存）";
   $("heroAmt").textContent = fmtY(c.total);
   $("heroToday").textContent = `今日 ${sign(c.todayPct)} ｜ 近30天 ${sign(c.w30)}`;
   $("heroToday").className = "hero-delta num " + cls(c.todayPct);
   $("kpiToday").textContent = fmtY(c.total * c.todayPct / 100);
   $("kpiToday").className = "value num " + cls(c.todayPct);
-  $("kpiTodaySub").textContent = "按最新净值日涨跌估算";
+  $("kpiTodaySub").textContent = srcLive || ("按最新净值 " + (lastDate || ""));
   $("kpi30").textContent = sign(c.w30);
   $("kpi30").className = "value num " + cls(c.w30);
   $("kpi30Sub").textContent = fmtY(c.total * c.w30 / 100);
@@ -648,13 +761,51 @@ function renderDash() {
 }
 
 /* ================= 明细视图 ================= */
+function renderHoldings() {
+  const rows = Object.keys(amounts).filter(c => amounts[c].amt > 0).map(c => {
+    const t = fundToday(c), mb = fundMainBucket(c);
+    const ps = (market?.funds?.[c]?.nav_history || []).map(p => p.pct).filter(p => p != null).slice(-30);
+    let w30 = null;
+    if (ps.length >= 2) { let i = 100; for (const p of ps) i *= 1 + p/100; w30 = i - 100; }
+    return {c, amt: amounts[c].amt,
+      name: amounts[c].name || market?.funds?.[c]?.name || c,
+      dayPct: t?.pct ?? null, dayAmt: t ? amounts[c].amt * t.pct / 100 : null,
+      src: t?.src, date: t?.date, bucket: mb.bucket, sub: mb.sub, w30,
+      w30Amt: w30 != null ? amounts[c].amt * w30 / 100 : null};
+  }).sort((a, b) => (b.dayAmt ?? -1e18) - (a.dayAmt ?? -1e18));
+  const total = rows.reduce((a, r) => a + r.amt, 0);
+  const daySum = rows.reduce((a, r) => a + (r.dayAmt || 0), 0);
+  $("holdTotal").textContent = fmtY(total);
+  const de = $("holdDay");
+  de.textContent = (daySum >= 0 ? "+" : "") + daySum.toFixed(2) + " 元";
+  de.className = "val num " + cls(daySum);
+  const mixed = rows.some(r => r.src === "估值");
+  $("holdDate").textContent =
+    (rows.find(r => r.date)?.date || "") + " 净值" + (mixed ? " · 含盘中估值" : "");
+  $("holdRows").innerHTML = rows.length ? rows.map(r => {
+    const sv = cssv(BUCKET_COLOR[r.bucket] || "--s10");
+    const f2 = n => (n >= 0 ? "+" : "") + n.toFixed(2);
+    return `<div class="hrow">
+      <div class="hmain"><div class="hname">${r.name}</div>
+        <div class="hamt num">¥ ${r.amt.toLocaleString("zh-CN",{maximumFractionDigits:2})}</div></div>
+      <div class="hcol num ${r.dayAmt==null?"":cls(r.dayAmt)}">
+        <div>${r.dayAmt==null?"—":f2(r.dayAmt)}</div>
+        <div class="hsub num ${r.dayPct==null?"":cls(r.dayPct)}">${r.dayPct==null?"":sign(r.dayPct)}${r.src==="估值"?" 估":""}</div></div>
+      <div class="hcol"><div class="hsec"><span class="sw" style="background:${sv}"></span>${r.bucket}</div>
+        <div class="hsub">${r.sub||""}</div></div>
+      <div class="hcol num ${r.w30==null?"":cls(r.w30)}">
+        <div>${r.w30Amt==null?"—":f2(r.w30Amt)}</div>
+        <div class="hsub num">${r.w30==null?"":sign(r.w30)}</div></div>
+    </div>`; }).join("")
+    : `<div class="hempty">暂无持仓，去「录入」添加基金</div>`;
+}
 function renderTxnView() {
+  renderHoldings();
   const codes = Object.keys(amounts);
-  $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>兜底大类</th><th>金额</th><th></th></tr>" +
+  $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>兜底板块</th><th>金额</th><th></th></tr>" +
     (codes.length ? codes.map(c => {
-      const cfg = fundsCfg.find(f => f.code === c) || {};
       return `<tr><td>${amounts[c].name || market?.funds?.[c]?.name || c}</td><td>${c}</td>
-        <td>${cfg.fallback || "其他"}</td><td class="num">${fmtY(amounts[c].amt)}</td>
+        <td>${fundBucketFallback(c)}</td><td class="num">${fmtY(amounts[c].amt)}</td>
         <td><button class="btn" style="padding:3px 10px;font-size:12px"
           onclick="delFund('${c}')">删除</button></td></tr>`; }).join("")
     : "<tr><td colspan=5 style='text-align:center;color:var(--ink-3)'>暂无</td></tr>");
@@ -689,9 +840,9 @@ async function lookupFund(code) {
       $("nName").value = name;
       $("nLookup").textContent = `✓ ${name}（${ftype || "未知类型"}）`;
       // 按类型猜兜底大类
-      const guess = /货币|理财/.test(ftype||"") ? "其他"
+      const guess = /货币|理财/.test(ftype||"") ? "综合"
         : /黄金|商品/.test(ftype||"") ? "黄金"
-        : /QDII|国际/.test(ftype||"") ? "海外QDII" : null;
+        : /QDII|国际|亚洲|全球|新兴|美国|纳斯达克|标普|日经/.test(ftype||"") ? "海外QDII" : null;
       if (guess) $("nFallback").value = guess;
     } else { $("nLookup").textContent = "未查到该代码，请确认"; }
   } catch { $("nLookup").textContent = "查询失败（网络），可手动填写名称"; }
@@ -765,9 +916,9 @@ async function ghWriteFunds(mutate) {
 function pickImage(file) {
   if (!file) return;
   if (!settings.zkey) { toast("请先在设置里填智谱 API Key"); navTo("set"); return; }
-  $("chMsg").textContent = "识别中…";
+  $("chMsg").textContent = "识别中…（约3~10秒）";
   const rd = new FileReader();
-  rd.onload = () => compressImage(rd.result, 1024, b64 => zhipuVision(b64));
+  rd.onload = () => compressImage(rd.result, 1280, b64 => zhipuVision(b64));
   rd.readAsDataURL(file);
 }
 function compressImage(dataUrl, maxW, cb) {
@@ -781,26 +932,58 @@ function compressImage(dataUrl, maxW, cb) {
   };
   img.src = dataUrl;
 }
+/* 识别提示词：按实测截图类型（持仓列表/资产详情/收益明细）定制 */
+const VISION_PROMPT = `你是基金App截图识别助手（蚂蚁基金/天天基金/支付宝等）。先判断截图类型，再提取持仓基金：
+1. 持仓列表、资产详情、持有页：提取每只基金的代码、名称、持有金额。
+2. 金额必须取「持有金额」；若页面显示「待确认金额」（顶部总额=持有金额+待确认金额），绝不能把待确认部分算进金额。
+3. 收益明细、业绩走势、交易记录、排行榜、搜索页等没有持仓信息的页面，输出 []。
+4. 同一只基金出现多行（不同份额/账户）要分别列出。看不到6位代码就填空串。
+只输出纯JSON数组，不要markdown代码块、不要解释：
+[{"code":"6位数字","name":"基金全称","amount":123.45}]`;
+function zhipuModels() {
+  return [...new Set([settings.zmodel, "glm-4.6v-flash", "glm-4.5v-flash", "glm-4v-flash"]
+    .map(s => (s||"").trim()).filter(Boolean))];
+}
+async function zhipuCall(model, b64, prompt) {
+  const r = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+    method:"POST",
+    headers:{"Content-Type":"application/json", Authorization:`Bearer ${settings.zkey}`},
+    body: JSON.stringify({model, temperature:0.1,
+      messages:[{role:"user", content:[
+        {type:"image_url", image_url:{url:"data:image/jpeg;base64,"+b64}},
+        {type:"text", text:prompt}]}]})});
+  let j = null;
+  try { j = await r.json(); } catch {}
+  if (!r.ok) throw Object.assign(
+    new Error(`HTTP ${r.status} ${j?.error?.message || "请求失败"}`), {status:r.status});
+  let text = j?.choices?.[0]?.message?.content ?? "";
+  if (Array.isArray(text)) text = text.map(p => p.text || "").join("");
+  return text;
+}
 async function zhipuVision(b64) {
-  const prompt = `这是基金相关截图。提取其中每只基金的信息，输出纯JSON数组（不要markdown代码块）：
-[{"code":"6位代码,没有则空串","name":"基金名称","amount":金额数字,没有则0,"action":"买入|卖出|定投|加仓|减仓|持仓",没有动作则省略,"date":"YYYY-MM-DD,没有则省略"}]`;
-  try {
-    const r = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
-      method:"POST",
-      headers:{"Content-Type":"application/json", Authorization:`Bearer ${settings.zkey}`},
-      body: JSON.stringify({model: settings.zmodel || "glm-4.5v-flash",
-        messages:[{role:"user", content:[
-          {type:"image_url", image_url:{url:"data:image/jpeg;base64,"+b64}},
-          {type:"text", text:prompt}]}]})});
-    const j = await r.json();
-    const text = j?.choices?.[0]?.message?.content || "";
-    const m = text.match(/\[[\s\S]*\]/);
-    if (!m) throw new Error(text.slice(0,80) || "无结果");
-    const items = JSON.parse(m[0]).filter(x => x && (x.name || x.code));
-    if (!items.length) throw new Error("未识别到基金");
-    showConfirm("图片识别结果", items);
-    $("chMsg").textContent = "";
-  } catch (e) { $("chMsg").textContent = "识别失败：" + e.message; }
+  let lastErr = "";
+  for (const m of zhipuModels()) {
+    try {
+      const text = await zhipuCall(m, b64, VISION_PROMPT);
+      if (settings.zmodel !== m) {   // 自动记住可用的模型
+        settings.zmodel = m; lsSet(LS.set, settings); $("sZmodel").value = m;
+      }
+      const mt = text.match(/\[[\s\S]*\]/);
+      if (!mt) throw new Error("返回无法解析：" + text.slice(0, 60));
+      const items = JSON.parse(mt[0])
+        .filter(x => x && (x.name || x.code))
+        .map(x => ({code:String(x.code||"").replace(/\D/g,"").slice(0,6),
+          name:x.name||"", amount:+x.amount||0, action:"持仓"}));
+      if (!items.length) { $("chMsg").textContent = "✓ 识别成功：此页面没有持仓（收益明细/走势等页）"; return; }
+      showConfirm(`图片识别结果 · 模型 ${m}`, items);
+      $("chMsg").textContent = "";
+      return;
+    } catch (e) {
+      lastErr = e.message;
+      if (e.status === 401 || e.status === 403) break;   // Key 问题，换模型无用
+    }
+  }
+  $("chMsg").textContent = "识别失败：" + lastErr;
 }
 $("btnCam").onclick = () => $("fileCam").click();
 $("btnImg").onclick = () => $("fileImg").click();
@@ -860,33 +1043,49 @@ function showConfirm(title, items) {
       <td><select id="cf_a${i}">${["买入","卖出","定投","加仓","减仓","持仓"]
         .map(a => `<option ${a===(it.action||"持仓")?"selected":""}>${a}</option>`).join("")}</select></td>
       <td><input id="cf_m${i}" value="${it.amount||""}" inputmode="decimal"></td></tr>`).join("") +
-    `</table><div class="hint">确认/修正后入库：已存在的基金记一笔交易并更新金额；新基金先入清单。</div>`;
+    `</table><div class="hint">确认/修正后入库：已存在的基金按所选动作更新金额；新基金先入清单。
+    同一基金多行（不同份额）会自动合并金额。</div>`;
   $("modalBg").classList.add("on");
 }
 $("modalCancel").onclick = () => $("modalBg").classList.remove("on");
 $("modalOk").onclick = async () => {
+  // 读取所有行
+  const rows = [];
   for (let i = 0; i < confirmItems.length; i++) {
     const code = $("cf_c"+i).value.trim(), name = $("cf_n"+i).value.trim();
     const amt = parseFloat($("cf_m"+i).value) || 0;
     const action = $("cf_a"+i).value;
     if (!name && !code) continue;
-    let c = code;
+    rows.push({code, name, amt, action});
+  }
+  // 同一代码多行（同基金不同份额的截图）→ 合并为一条，金额按方向相加
+  const merged = new Map();
+  for (const r of rows) {
+    const k = r.code || "n:" + r.name;
+    if (!merged.has(k)) { merged.set(k, {...r}); continue; }
+    const m = merged.get(k);
+    const sell = r.action === "卖出" || r.action === "减仓";
+    m.amt = sell ? m.amt - r.amt : m.amt + r.amt;
+  }
+  if (merged.size < rows.length) toast("同一基金的多行已合并金额");
+  for (const m of merged.values()) {
+    let c = m.code;
     if (c && !amounts[c]) {   // 新基金 → 写 GitHub 清单
       const ok = await ghWriteFunds(cfg => {
-        if (!cfg.find(f => f.code === c)) cfg.push({code:c, fallback:"其他",
-          added:new Date().toISOString().slice(0,10), note:name});
+        if (!cfg.find(f => f.code === c)) cfg.push({code:c, fallback:"综合",
+          added:new Date().toISOString().slice(0,10), note:m.name});
         return cfg; });
       if (!ok) toast("GitHub 写入失败，此条基金未入清单（金额仍存本机）");
-      else fundsCfg.push({code:c, fallback:"其他"});
+      else fundsCfg.push({code:c, fallback:"综合"});
     }
     if (!c) continue;
-    if (action !== "持仓") txns.push({d:new Date().toISOString().slice(0,10),
-      code:c, name, action, amount:amt});
-    if (amt > 0) {
+    if (m.action !== "持仓") txns.push({d:new Date().toISOString().slice(0,10),
+      code:c, name:m.name, action:m.action, amount:m.amt});
+    if (m.amt !== 0) {
       const old = amounts[c]?.amt || 0;
-      const val = (action === "卖出" || action === "减仓") ? old - amt
-        : action === "持仓" ? amt : old + amt;
-      amounts[c] = {amt: Math.max(val, 0), name: name || amounts[c]?.name || ""};
+      const val = (m.action === "卖出" || m.action === "减仓") ? old - m.amt
+        : m.action === "持仓" ? m.amt : old + m.amt;
+      amounts[c] = {amt: Math.max(val, 0), name: m.name || amounts[c]?.name || ""};
     }
   }
   lsSet(LS.amt, amounts); lsSet(LS.txn, txns);
@@ -897,11 +1096,39 @@ $("modalOk").onclick = async () => {
 /* ================= 设置 ================= */
 $("btnSaveSet").onclick = () => {
   settings = {repo: $("sRepo").value.trim(), pat: $("sPat").value.trim(),
-    zkey: $("sZkey").value.trim(), zmodel: $("sZmodel").value.trim() || "glm-4.5v-flash"};
+    zkey: $("sZkey").value.trim(), zmodel: $("sZmodel").value.trim() || "glm-4.6v-flash"};
   lsSet(LS.set, settings);
   $("setMsg").textContent = "✓ 已保存（仅本机）";
   $("ftRepo").textContent = settings.repo || "";
 };
+/* 识别连通测试：生成一张带文字的图片直接调 API，验证 Key+模型是否可用 */
+$("btnZtest").onclick = async () => {
+  if (!$("sZkey").value.trim()) { toast("请先填 API Key"); return; }
+  settings.zkey = $("sZkey").value.trim();
+  settings.zmodel = $("sZmodel").value.trim();
+  lsSet(LS.set, settings);
+  $("setMsg").textContent = "测试中…";
+  const cv = document.createElement("canvas"); cv.width = 400; cv.height = 140;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, 400, 140);
+  ctx.fillStyle = "#111"; ctx.font = "600 30px sans-serif";
+  ctx.fillText("识别测试 012345", 28, 80);
+  const b64 = cv.toDataURL("image/jpeg", .9).split(",")[1];
+  let lastErr = "";
+  for (const m of zhipuModels()) {
+    try {
+      const text = await zhipuCall(m, b64, "图中写了什么文字？只回答文字本身。");
+      settings.zmodel = m; lsSet(LS.set, settings); $("sZmodel").value = m;
+      $("setMsg").textContent = `✓ 连接成功（模型 ${m}）回答：${text.slice(0, 30)}`;
+      return;
+    } catch (e) {
+      lastErr = e.message;
+      if (e.status === 401 || e.status === 403) break;   // Key 无效
+    }
+  }
+  $("setMsg").textContent = "✗ 连接失败：" + lastErr;
+};
+
 $("btnExport").onclick = () => {
   const blob = new Blob([JSON.stringify({amounts, txns}, null, 1)], {type:"application/json"});
   const a = document.createElement("a");
@@ -938,9 +1165,10 @@ $("themeBtn").onclick = () => {
       : "");
   $("sPat").value = settings.pat || "";
   $("sZkey").value = settings.zkey || "";
-  $("sZmodel").value = settings.zmodel || "glm-4.5v-flash";
+  $("sZmodel").value = settings.zmodel || "glm-4.6v-flash";
   $("ftRepo").textContent = settings.repo || "";
   loadData();
+  fetchLive();
 })();
 </script>
 </body>

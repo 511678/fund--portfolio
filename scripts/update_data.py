@@ -61,11 +61,14 @@ def stock_industry(stock_code: str, texch: str) -> str:
     return "海外/其他" if texch not in ("1", "2") else "其他"
 
 
-def fetch_industries(code: str) -> dict:
-    """返回 {行业: 占净值比%}，基于前十大重仓股的真实行业。"""
+def fetch_position(code: str) -> dict:
     d = get_json(f"{MOB}/FundMNInverstPosition?FCODE={code}"
                  "&deviceid=1&plat=Iphone&product=EFund&version=6.2.5")
-    stocks = (d.get("Datas") or {}).get("fundStocks") or []
+    return d.get("Datas") or {}
+
+
+def industries_from_stocks(stocks: list) -> tuple:
+    """前十大重仓股 → ({行业: 占净值比%}, 已披露合计%)。"""
     industries, total = {}, 0.0
     for s in stocks:
         try:
@@ -78,8 +81,28 @@ def fetch_industries(code: str) -> dict:
         industries[ind] = round(industries.get(ind, 0) + weight, 2)
         total += weight
         time.sleep(STOCK_SLEEP)
+    return industries, total
+
+
+def fetch_industries(code: str) -> dict:
+    """返回 {行业: 占净值比%}。普通基金看前十大重仓股；
+    ETF联接基金直持股票极少，穿透到目标 ETFCODE 的重仓股按其仓位折算。"""
+    d = fetch_position(code)
+    industries, total = industries_from_stocks(d.get("fundStocks") or [])
+    etf = (d.get("ETFCODE") or "").strip()
+    if etf and etf != code:
+        try:
+            bonds = sum(float(b.get("ZJZBL") or 0)
+                        for b in (d.get("fundboods") or []))
+            etf_w = max(100 - total - bonds, 0)   # 仓位≈100-直持股票-债券
+            einds, etotal = industries_from_stocks(fetch_position(etf).get("fundStocks") or [])
+            for ind, w in einds.items():
+                industries[ind] = round(industries.get(ind, 0) + w * etf_w / 100, 2)
+            total += etotal * etf_w / 100
+        except Exception:
+            pass
     if industries:
-        residual = round(100 - total, 2)   # 未进前十大的部分（现金/债券/其他股票）
+        residual = round(100 - total, 2)   # 未进前十大的部分（现金/其他）
         industries["未披露/其他"] = max(residual, 0)
     return industries
 
