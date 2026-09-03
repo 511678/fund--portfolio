@@ -493,10 +493,6 @@ function fundMainBucket(code) {
   const top = inds.sort((a, b) => b[1] - a[1])[0][0];
   return {bucket: best, sub: top};
 }
-function bucketOf(industry) {
-  for (const [re, b] of INDUSTRY_RULES) if (re.test(industry)) return b;
-  return "其他";
-}
 const LS = { amt:"fp_amounts", txn:"fp_txns", set:"fp_settings", cache:"fp_market_cache" };
 const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const lsSet = (k, v) => localStorage.setItem(k, JSON.stringify(v));
