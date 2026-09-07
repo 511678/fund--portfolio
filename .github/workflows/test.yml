@@ -1,0 +1,25 @@
+# 纯逻辑层单测（js/core.js），push 涉及前端文件时运行
+name: tests
+
+on:
+  push:
+    paths: ["js/**", "tests/**", "index.html", "package.json"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 运行单测
+        run: node --test tests/*.test.mjs

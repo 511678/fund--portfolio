@@ -1,0 +1,11 @@
+{
+  "name": "fund-portfolio",
+  "private": true,
+  "description": "基金板块分析（GitHub Pages 静态页，无构建）",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

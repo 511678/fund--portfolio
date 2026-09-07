@@ -18,6 +18,7 @@
     --grid:#e1e0d9; --border:rgba(11,11,11,.10);
     --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
     --s7:#7b5cd6; --s8:#7a5230; --s9:#12939f; --s10:#8a8880; --s11:#c9971f;
+    --sx:#b5b3aa;                              /* 未披露/其他 */
     --up:#d03b3b; --down:#1c5cab;              /* 红涨蓝跌 */
     --warn-bg:#fdf3e0; --warn-ink:#7a5200;
   }
@@ -29,6 +30,7 @@
       --grid:#2c2c2a; --border:rgba(255,255,255,.10);
       --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
       --s7:#9b7fe8; --s8:#a97b4a; --s9:#2fb3bf; --s10:#7d7b74; --s11:#d4af37;
+      --sx:#56554e;
       --up:#e66767; --down:#6da7ec;
       --warn-bg:#3a2e10; --warn-ink:#fab219;
     }
@@ -40,6 +42,7 @@
     --grid:#2c2c2a; --border:rgba(255,255,255,.10);
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
     --s7:#9b7fe8; --s8:#a97b4a; --s9:#2fb3bf; --s10:#7d7b74; --s11:#d4af37;
+    --sx:#56554e;
     --up:#e66767; --down:#6da7ec;
     --warn-bg:#3a2e10; --warn-ink:#fab219;
   }
@@ -251,7 +254,7 @@
     <div id="dashBody" class="hide">
       <section class="hero">
         <div class="card hero-main">
-          <div class="hero-label">总投入成本</div>
+          <div class="hero-label">持仓总市值（本机）</div>
           <div class="hero-value num" id="heroAmt">¥0</div>
           <div class="hero-delta num" id="heroToday">—</div>
         </div>
@@ -292,7 +295,7 @@
       </section>
 
       <section class="card">
-        <h3>组合净值走势 · 起点指数化=100</h3>
+        <h3>组合净值走势 · 按当前持仓权重回溯，起点指数化=100</h3>
         <svg id="trend" width="100%" viewBox="0 0 680 200" preserveAspectRatio="none"
           role="img" aria-label="组合走势"></svg>
         <details class="tbl">
@@ -451,27 +454,15 @@
 
 <div id="toast"></div>
 
+<script src="js/core.js"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
+const { bucketOf, esc, todayLocal, isFreshNav } = FP;
 const BUCKETS = ["信息技术","先进制造","消费","医药","金融","周期资源","基建地产","综合","黄金","海外QDII"];
 const BUCKET_COLOR = {"信息技术":"--s1","先进制造":"--s2","消费":"--s3","医药":"--s5",
-  "金融":"--s7","周期资源":"--s8","基建地产":"--s9","综合":"--s10","黄金":"--s11","海外QDII":"--s6"};
-const INDUSTRY_RULES = [   // 申万细分行业 → 10大板块（顺序匹配，靠前者优先）
-  [/贵金属|黄金|金银/, "黄金"],
-  [/海外|港股|美股|纳斯达克|标普|日经|新兴市场|亚洲|全球/, "海外QDII"],
-  [/半导体|芯片|集成电路|元件|PCB|印制电路|被动元件|分立器件|电子化学品|光学光电子|消费电子|电子|光模块|通信|计算机|软件|互联网|云计算|IT服务|人工智能|算力|游戏|传媒|数字媒体|影视|出版|广告营销/, "信息技术"],
-  [/电池|光伏|风电|电源|电网|储能|电力设备|锂电|机械设备|自动化|机器人|军工|国防|航天|航空装备|汽车|乘用车|商用车|摩托车/, "先进制造"],
-  [/医药|医疗|生物|中药|制药|疫苗|CXO|医疗服务/, "医药"],
-  [/银行|证券|保险|信托|多元金融|金融/, "金融"],
-  [/钢铁|化工|化学|塑料|橡胶|化纤|有色|能源金属|小金属|工业金属|金属新材料|煤炭|石油|石化|炼化|油服|水泥|玻璃|建材|建筑材料|环保|肥料|农化/, "周期资源"],
-  [/房地产|建筑|装饰|交通运输|公路|铁路|航空|机场|港口|航运|物流|公用事业|电力|燃气|水务/, "基建地产"],
-  [/白酒|酿酒|啤酒|乳品|食品|饮料|调味|零食|保健品|家电|家用电器|照明|厨卫|美容护理|化妆品|个护|纺织|服装|服饰|商贸|零售|旅游|酒店|餐饮|教育|社会服务|轻工|造纸|包装|家居|农林牧渔|种植|养殖|畜牧|饲料|渔业|宠物/, "消费"],
-];
-function bucketOf(industry) {
-  for (const [re, b] of INDUSTRY_RULES) if (re.test(industry)) return b;
-  return "综合";
-}
+  "金融":"--s7","周期资源":"--s8","基建地产":"--s9","综合":"--s10","黄金":"--s11","海外QDII":"--s6",
+  "未披露":"--sx"};
 /* 无A股行业数据时的兜底板块：先按基金类型自动纠正（黄金/QDII），再取用户选的，最后综合 */
 function fundBucketFallback(code) {
   const t = market?.funds?.[code]?.type || "";
@@ -481,17 +472,7 @@ function fundBucketFallback(code) {
 }
 /* 某基金的主板块（占比最高的行业所归板块）+ 第一大细分行业 */
 function fundMainBucket(code) {
-  const inds = Object.entries(market?.funds?.[code]?.industries || {});
-  if (!inds.length) return {bucket: fundBucketFallback(code), sub: ""};
-  const agg = {};
-  let best = "综合", bv = -1;
-  for (const [ind, w] of inds) {
-    const b = bucketOf(ind);
-    agg[b] = (agg[b] || 0) + w;
-    if (agg[b] > bv) { bv = agg[b]; best = b; }
-  }
-  const top = inds.sort((a, b) => b[1] - a[1])[0][0];
-  return {bucket: best, sub: top};
+  return FP.fundMainBucket(market?.funds?.[code]?.industries, fundBucketFallback(code));
 }
 const LS = { amt:"fp_amounts", txn:"fp_txns", set:"fp_settings", cache:"fp_market_cache" };
 const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
@@ -546,7 +527,8 @@ async function loadData() {
 }
 
 /* ============ 盘中实时估值（天天基金App同源接口，CORS全开） ============
-   盘中 GSZZL=实时估值涨跌%；收盘后 GSZZL 变空、NAVCHGRT=官方净值涨跌%。 */
+   盘中 GSZZL=实时估值涨跌%；收盘后 GSZZL 变空、NAVCHGRT=官方净值涨跌%。
+   静态 nav_history 兜底时校验时效，过期数据返回 stale（不冒充今日）。 */
 function fundToday(code) {
   const L = live[code];
   if (L?.GSZZL != null && L.GSZZL !== "" && L.GSZZL !== "-")
@@ -555,7 +537,9 @@ function fundToday(code) {
     return {pct:+L.NAVCHGRT, src:"净值", date:(L.PDATE||"").slice(5,10)};
   const nav = market?.funds?.[code]?.nav_history || [];
   for (let i = nav.length - 1; i >= 0; i--)
-    if (nav[i].pct != null) return {pct:nav[i].pct, src:"净值", date:nav[i].d.slice(5)};
+    if (nav[i].pct != null) return isFreshNav(nav[i].d)
+      ? {pct:nav[i].pct, src:"净值", date:nav[i].d.slice(5)}
+      : {pct:null, src:"净值", date:nav[i].d.slice(5), stale:true};
   return null;
 }
 async function fetchLive() {
@@ -621,6 +605,7 @@ function compute() {
       return idx; });
     out.mdd = mdd; out.mddDate = mddD;
     const n30 = Math.min(30, pr.length - 1);
+    out.n30 = n30;
     let i30 = 100; for (let i = pr.length - n30; i < pr.length; i++) i30 *= 1 + pr[i]/100;
     out.w30 = i30 - 100;
     // 板块级波动/近7天/近30天
@@ -657,9 +642,10 @@ function renderDash() {
   const c = compute();
   // 盘中实时校准今日涨跌（估值/最新净值优先于 Action 抓的净值序列）
   let pSum = 0, pW = 0, srcLive = "";
-  let lastDate = "";
+  let lastDate = "", staleCnt = 0;
   for (const c2 of Object.keys(c.perFund)) {
     const t = fundToday(c2); if (!t) continue;
+    if (t.pct == null) { staleCnt++; continue; }   // 净值待更新，不计入今日
     pSum += c.perFund[c2].amt * t.pct / 100; pW += c.perFund[c2].amt;
     if (t.src === "估值") srcLive = "盘中估值 · 实时";
     if (t.date > lastDate) lastDate = t.date;
@@ -671,15 +657,18 @@ function renderDash() {
   $("heroToday").className = "hero-delta num " + cls(c.todayPct);
   $("kpiToday").textContent = fmtY(c.total * c.todayPct / 100);
   $("kpiToday").className = "value num " + cls(c.todayPct);
-  $("kpiTodaySub").textContent = srcLive || ("按最新净值 " + (lastDate || ""));
+  $("kpiTodaySub").textContent = (srcLive || ("按最新净值 " + (lastDate || "")))
+    + (staleCnt ? ` · ${staleCnt}只待更新` : "");
   $("kpi30").textContent = sign(c.w30);
   $("kpi30").className = "value num " + cls(c.w30);
-  $("kpi30Sub").textContent = fmtY(c.total * c.w30 / 100);
+  $("kpi30Sub").textContent = fmtY(c.total * c.w30 / 100)
+    + (c.n30 != null && c.n30 < 30 ? ` · 仅${c.n30}天样本` : " · 当前权重");
   $("kpiMdd").textContent = c.mdd.toFixed(1) + "%";
   $("kpiMddSub").textContent = c.mddDate || "组合口径";
 
-  // 集中度预警 >25%
-  const big = Object.entries(c.sectors).filter(([,s]) => s.value/c.total > .25);
+  // 集中度预警 >25%（未披露部分不是真实配置，不参与预警）
+  const big = Object.entries(c.sectors)
+    .filter(([b, s]) => b !== "未披露" && s.value/c.total > .25);
   const bar = $("alertBar");
   if (big.length) { bar.style.display = "block";
     bar.textContent = "⚠️ " + big.map(([b,s]) =>
@@ -703,7 +692,7 @@ function renderDash() {
     svg.appendChild(el); acc += pct;
   }
   $("legendTable").innerHTML = entries.map(([b,s]) => `<tr>
-    <td><span class="sw" style="background:${cssv(BUCKET_COLOR[b])}"></span>${b}</td>
+    <td><span class="sw" style="background:${cssv(BUCKET_COLOR[b])}"></span>${esc(b)}</td>
     <td class="r num">${fmtY(s.value)}</td>
     <td class="r num pct">${(s.value/c.total*100).toFixed(1)}%</td></tr>`).join("");
 
@@ -724,7 +713,7 @@ function renderDash() {
     }
     return `<div class="card scard">
       <div class="row1"><span class="sw" style="background:${cssv(BUCKET_COLOR[b])}"></span>
-        <span class="name">${b}</span><span style="flex:1"></span>
+        <span class="name">${esc(b)}</span><span style="flex:1"></span>
         <span class="num ${cls(s.w7)}" style="font-size:13px;font-weight:600">${s.w7==null?"—":sign(s.w7)}</span></div>
       <div class="amt num">${fmtY(s.value)}</div>
       <div class="pct-w30 num"><span>占比 ${(s.value/c.total*100).toFixed(1)}%</span>
@@ -732,7 +721,7 @@ function renderDash() {
       ${svgPart}
       <div class="vol num">日波动 ${s.vol==null?"数据不足":s.vol.toFixed(2)+"%"} ｜ ${s.funds.size}只基金</div>
       <div class="funds">${[...s.funds].map(f =>
-        (market?.funds?.[f]?.name || f)).join("、")}</div>
+        esc(market?.funds?.[f]?.name || f)).join("、")}</div>
     </div>`; }).join("");
 
   // 走势
@@ -747,12 +736,12 @@ function renderDash() {
       `<polygon points="${padL},${ys(mn)} ${pts} ${xs(t.idx.length-1)},${ys(mn)}"
          fill="${cssv("--s1")}" opacity=".1"/>
        <polyline points="${pts}" fill="none" stroke="${cssv("--s1")}" stroke-width="2"/>
-       <text x="${padL}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}">${t.dates[0]}</text>
-       <text x="${W-padR}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}" text-anchor="end">${t.dates.at(-1)}</text>`;
+       <text x="${padL}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}">${esc(t.dates[0])}</text>
+       <text x="${W-padR}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}" text-anchor="end">${esc(t.dates.at(-1))}</text>`;
     const step = Math.ceil(t.dates.length/8);
     $("trendTable").innerHTML = "<tr><th>日期</th><th>指数</th></tr>" +
       t.dates.map((d,i) => (i%step===0 || i===t.dates.length-1)
-        ? `<tr><td>${d}</td><td>${t.idx[i].toFixed(1)}</td></tr>` : "").join("");
+        ? `<tr><td>${esc(d)}</td><td>${t.idx[i].toFixed(1)}</td></tr>` : "").join("");
   }
 }
 
@@ -765,8 +754,9 @@ function renderHoldings() {
     if (ps.length >= 2) { let i = 100; for (const p of ps) i *= 1 + p/100; w30 = i - 100; }
     return {c, amt: amounts[c].amt,
       name: amounts[c].name || market?.funds?.[c]?.name || c,
-      dayPct: t?.pct ?? null, dayAmt: t ? amounts[c].amt * t.pct / 100 : null,
-      src: t?.src, date: t?.date, bucket: mb.bucket, sub: mb.sub, w30,
+      dayPct: t?.pct ?? null, dayAmt: t?.pct != null ? amounts[c].amt * t.pct / 100 : null,
+      src: t?.src, date: t?.date, stale: !!t?.stale,
+      bucket: mb.bucket, sub: mb.sub, w30,
       w30Amt: w30 != null ? amounts[c].amt * w30 / 100 : null};
   }).sort((a, b) => (b.dayAmt ?? -1e18) - (a.dayAmt ?? -1e18));
   const total = rows.reduce((a, r) => a + r.amt, 0);
@@ -782,13 +772,13 @@ function renderHoldings() {
     const sv = cssv(BUCKET_COLOR[r.bucket] || "--s10");
     const f2 = n => (n >= 0 ? "+" : "") + n.toFixed(2);
     return `<div class="hrow">
-      <div class="hmain"><div class="hname">${r.name}</div>
+      <div class="hmain"><div class="hname">${esc(r.name)}</div>
         <div class="hamt num">¥ ${r.amt.toLocaleString("zh-CN",{maximumFractionDigits:2})}</div></div>
       <div class="hcol num ${r.dayAmt==null?"":cls(r.dayAmt)}">
         <div>${r.dayAmt==null?"—":f2(r.dayAmt)}</div>
-        <div class="hsub num ${r.dayPct==null?"":cls(r.dayPct)}">${r.dayPct==null?"":sign(r.dayPct)}${r.src==="估值"?" 估":""}</div></div>
-      <div class="hcol"><div class="hsec"><span class="sw" style="background:${sv}"></span>${r.bucket}</div>
-        <div class="hsub">${r.sub||""}</div></div>
+        <div class="hsub num ${r.dayPct==null?"":cls(r.dayPct)}">${r.stale?"净值待更新":r.dayPct==null?"":sign(r.dayPct)+(r.src==="估值"?" 估":"")}</div></div>
+      <div class="hcol"><div class="hsec"><span class="sw" style="background:${sv}"></span>${esc(r.bucket)}</div>
+        <div class="hsub">${esc(r.sub||"")}</div></div>
       <div class="hcol num ${r.w30==null?"":cls(r.w30)}">
         <div>${r.w30Amt==null?"—":f2(r.w30Amt)}</div>
         <div class="hsub num">${r.w30==null?"":sign(r.w30)}</div></div>
@@ -800,17 +790,22 @@ function renderTxnView() {
   const codes = Object.keys(amounts);
   $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>兜底板块</th><th>金额</th><th></th></tr>" +
     (codes.length ? codes.map(c => {
-      return `<tr><td>${amounts[c].name || market?.funds?.[c]?.name || c}</td><td>${c}</td>
-        <td>${fundBucketFallback(c)}</td><td class="num">${fmtY(amounts[c].amt)}</td>
-        <td><button class="btn" style="padding:3px 10px;font-size:12px"
-          onclick="delFund('${c}')">删除</button></td></tr>`; }).join("")
+      return `<tr><td>${esc(amounts[c].name || market?.funds?.[c]?.name || c)}</td><td>${esc(c)}</td>
+        <td>${esc(fundBucketFallback(c))}</td><td class="num">${fmtY(amounts[c].amt)}</td>
+        <td><button class="btn del-fund" data-code="${esc(c)}"
+          style="padding:3px 10px;font-size:12px">删除</button></td></tr>`; }).join("")
     : "<tr><td colspan=5 style='text-align:center;color:var(--ink-3)'>暂无</td></tr>");
   $("txnTable").innerHTML = "<tr><th>日期</th><th>基金</th><th>动作</th><th>金额</th></tr>" +
     (txns.length ? txns.slice().reverse().map(t =>
-      `<tr><td>${t.d}</td><td>${t.name || t.code}</td><td>${t.action}</td>
+      `<tr><td>${esc(t.d)}</td><td>${esc(t.name || t.code)}</td><td>${esc(t.action)}</td>
        <td class="num">${fmtY(t.amount)}</td></tr>`).join("")
     : "<tr><td colspan=4 style='text-align:center;color:var(--ink-3)'>暂无</td></tr>");
 }
+/* 删除按钮用事件委托（不用内联 onclick，防 JS 上下文注入） */
+document.addEventListener("click", e => {
+  const b = e.target.closest(".del-fund");
+  if (b) delFund(b.dataset.code);
+});
 window.delFund = c => {
   if (!confirm(`删除 ${amounts[c]?.name || c} 及其金额记录？`)) return;
   delete amounts[c]; lsSet(LS.amt, amounts); renderTxnView(); renderDash();
@@ -852,7 +847,7 @@ $("btnAddFund").onclick = async () => {
   const fb = $("nFallback").value;
   $("btnAddFund").disabled = true; $("addMsg").textContent = "保存中…";
   const ok = await ghWriteFunds(cfg => {
-    if (!cfg.find(f => f.code === code)) cfg.push({code, fallback:fb, added:new Date().toISOString().slice(0,10)});
+    if (!cfg.find(f => f.code === code)) cfg.push({code, fallback:fb, added:todayLocal()});
     return cfg;
   });
   amounts[code] = {amt, name}; lsSet(LS.amt, amounts);
@@ -862,21 +857,20 @@ $("btnAddFund").onclick = async () => {
     $("nLookup").textContent = "输入完整代码后自动查询名称";
     fundsCfg.push({code, fallback:fb}); renderDash(); }
 };
-window.retryPending = null;
 
 /* ================= 录入：交易 ================= */
 function refreshFundSelect() {
   const codes = Object.keys(amounts);
   $("tFund").innerHTML = codes.length
-    ? codes.map(c => `<option value="${c}">${amounts[c].name || c}</option>`).join("")
+    ? codes.map(c => `<option value="${esc(c)}">${esc(amounts[c].name || c)}</option>`).join("")
     : "<option value=''>—先添加基金—</option>";
-  $("tDate").value = new Date().toISOString().slice(0,10);
+  $("tDate").value = todayLocal();
 }
 $("btnAddTxn").onclick = () => {
   const code = $("tFund").value, amt = parseFloat($("tAmt").value);
   if (!code) return toast("请先添加基金");
   if (!(amt > 0)) return toast("请填写金额");
-  txns.push({d: $("tDate").value || new Date().toISOString().slice(0,10),
+  txns.push({d: $("tDate").value || todayLocal(),
     code, name: amounts[code]?.name, action: $("tAction").value, amount: amt});
   lsSet(LS.txn, txns);
   $("tAmt").value = ""; $("txnMsg").textContent = "✓ 已记录（本机）";
@@ -895,7 +889,7 @@ async function ghWriteFunds(mutate) {
     if (r.status === 200) { const j = await r.json(); sha = j.sha;
       const b8 = Uint8Array.from(atob(j.content.replace(/\n/g,"")), c => c.charCodeAt(0));
       cfg = JSON.parse(new TextDecoder().decode(b8));
-      if (Array.isArray(cfg)) cfg = cfg; else cfg = cfg.funds || cfg; }
+      if (!Array.isArray(cfg)) cfg = cfg.funds || cfg; }
     else if (r.status !== 404) return false;
   } catch { return false; }
   cfg = mutate(cfg) || cfg;
@@ -1031,14 +1025,15 @@ let confirmItems = [];
 function showConfirm(title, items) {
   confirmItems = items;
   $("modalTitle").textContent = title;
+  // it.code/name/amount 来自截图识别（LLM 输出）或语音文本，不可信，必须转义
   $("modalBody").innerHTML = `<table class="data confirm-tbl">
     <tr><th>代码</th><th>名称</th><th>动作</th><th>金额</th></tr>` +
     items.map((it,i) => `<tr>
-      <td><input id="cf_c${i}" value="${it.code||""}" maxlength="6" inputmode="numeric"></td>
-      <td><input id="cf_n${i}" value="${it.name||""}"></td>
+      <td><input id="cf_c${i}" value="${esc(it.code||"")}" maxlength="6" inputmode="numeric"></td>
+      <td><input id="cf_n${i}" value="${esc(it.name||"")}"></td>
       <td><select id="cf_a${i}">${["买入","卖出","定投","加仓","减仓","持仓"]
         .map(a => `<option ${a===(it.action||"持仓")?"selected":""}>${a}</option>`).join("")}</select></td>
-      <td><input id="cf_m${i}" value="${it.amount||""}" inputmode="decimal"></td></tr>`).join("") +
+      <td><input id="cf_m${i}" value="${esc(it.amount||"")}" inputmode="decimal"></td></tr>`).join("") +
     `</table><div class="hint">确认/修正后入库：已存在的基金按所选动作更新金额；新基金先入清单。
     同一基金多行（不同份额）会自动合并金额。</div>`;
   $("modalBg").classList.add("on");
@@ -1066,16 +1061,20 @@ $("modalOk").onclick = async () => {
   if (merged.size < rows.length) toast("同一基金的多行已合并金额");
   for (const m of merged.values()) {
     let c = m.code;
+    if (c) {   // 手填代码也清洗为纯数字，保证 amounts 的 key 恒为 6 位数字
+      c = c.replace(/\D/g, "").slice(0, 6);
+      if (!/^\d{6}$/.test(c)) continue;
+    }
     if (c && !amounts[c]) {   // 新基金 → 写 GitHub 清单
       const ok = await ghWriteFunds(cfg => {
         if (!cfg.find(f => f.code === c)) cfg.push({code:c, fallback:"综合",
-          added:new Date().toISOString().slice(0,10), note:m.name});
+          added:todayLocal(), note:m.name});
         return cfg; });
       if (!ok) toast("GitHub 写入失败，此条基金未入清单（金额仍存本机）");
       else fundsCfg.push({code:c, fallback:"综合"});
     }
     if (!c) continue;
-    if (m.action !== "持仓") txns.push({d:new Date().toISOString().slice(0,10),
+    if (m.action !== "持仓") txns.push({d:todayLocal(),
       code:c, name:m.name, action:m.action, amount:m.amt});
     if (m.amt !== 0) {
       const old = amounts[c]?.amt || 0;
@@ -1129,7 +1128,7 @@ $("btnExport").onclick = () => {
   const blob = new Blob([JSON.stringify({amounts, txns}, null, 1)], {type:"application/json"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "fund-backup-" + new Date().toISOString().slice(0,10) + ".json";
+  a.download = "fund-backup-" + todayLocal() + ".json";
   a.click();
 };
 $("btnImport").onclick = () => $("fileImport").click();
@@ -1138,8 +1137,27 @@ $("fileImport").onchange = e => {
   const rd = new FileReader();
   rd.onload = () => { try {
     const j = JSON.parse(rd.result);
-    if (j.amounts) { amounts = j.amounts; lsSet(LS.amt, amounts); }
-    if (j.txns) { txns = j.txns; lsSet(LS.txn, txns); }
+    // 导入内容不可信：代码强制 6 位数字、金额/名称/动作清洗后再入库
+    if (j.amounts && typeof j.amounts === "object") {
+      const clean = {};
+      for (const [c, v] of Object.entries(j.amounts)) {
+        const k = String(c).replace(/\D/g, "").slice(0, 6);
+        const amt = +v?.amt;
+        if (!/^\d{6}$/.test(k) || !(amt >= 0)) continue;
+        clean[k] = {amt, name: String(v?.name ?? "").slice(0, 60)};
+      }
+      amounts = clean; lsSet(LS.amt, amounts);
+    }
+    if (Array.isArray(j.txns)) {
+      const acts = ["买入","卖出","定投","加仓","减仓"];
+      txns = j.txns.filter(t => t && /^\d{6}$/.test(String(t.code).replace(/\D/g,"").slice(0,6)))
+        .map(t => ({d: String(t.d || "").slice(0, 10),
+          code: String(t.code).replace(/\D/g, "").slice(0, 6),
+          name: String(t.name || "").slice(0, 60),
+          action: acts.includes(t.action) ? t.action : "买入",
+          amount: +t.amount || 0}));
+      lsSet(LS.txn, txns);
+    }
     renderDash(); toast("导入成功");
   } catch { toast("文件格式不对"); } };
   rd.readAsText(f);
