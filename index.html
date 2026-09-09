@@ -83,6 +83,8 @@
   .hero-main { display:flex; flex-direction:column; justify-content:center; }
   .hero-label { font-size:13px; color:var(--ink-2); }
   .hero-value { font-size:46px; font-weight:700; letter-spacing:-1px; line-height:1.15; }
+  .hero-pnl { font-size:16px; font-weight:650; margin-top:6px; }
+  .hero-pnl .sub { font-size:12px; font-weight:500; color:var(--ink-3); margin-left:6px; }
   .hero-delta { font-size:14px; font-weight:600; }
   .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
   .tile .label { font-size:12px; color:var(--ink-3); }
@@ -164,6 +166,7 @@
     background:var(--page); color:var(--ink-1); font-size:14px; cursor:pointer; }
   .btn.primary { background:var(--s1); border-color:var(--s1); color:#fff; font-weight:600; }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .b-mini { padding:3px 8px; font-size:12px; }
   .hint { font-size:12px; color:var(--ink-3); margin-top:4px; }
   .ok-msg { color:var(--s3); font-size:13px; margin-top:8px; min-height:18px; }
 
@@ -254,8 +257,9 @@
     <div id="dashBody" class="hide">
       <section class="hero">
         <div class="card hero-main">
-          <div class="hero-label">持仓总市值（本机）</div>
+          <div class="hero-label">持仓总市值</div>
           <div class="hero-value num" id="heroAmt">¥0</div>
+          <div class="hero-pnl num" id="heroPnl">—</div>
           <div class="hero-delta num" id="heroToday">—</div>
         </div>
         <div class="kpis">
@@ -325,8 +329,11 @@
             <option>周期资源</option><option>基建地产</option>
             <option>黄金</option><option>海外QDII</option>
           </select></div>
-        <div class="field"><label>投入金额（元，只存本机，不上传）</label>
+        <div class="field"><label>持仓市值 / 投入金额（元，只存本机，不上传）</label>
           <input id="nAmt" inputmode="decimal" placeholder="如 5000"></div>
+        <div class="field"><label>累计投入成本（元，可选）</label>
+          <input id="nCost" inputmode="decimal" placeholder="留空 = 按市值开账，盈亏从今天起算">
+          <div class="hint">已有持仓快照：金额填最新市值，成本填总共投入的钱（含买入手续费）</div></div>
         <button class="btn primary" id="btnAddFund">保存基金</button>
         <div class="ok-msg" id="addMsg"></div>
       </div>
@@ -346,6 +353,7 @@
         </div>
         <button class="btn primary" id="btnAddTxn">保存交易</button>
         <div class="ok-msg" id="txnMsg"></div>
+        <div class="hint">交易会同步更新该基金持仓市值与累计成本：买入/定投=加市值加成本，卖出=按比例摊减成本。快照市值请用左侧「添加基金」或截图识别。</div>
       </div>
     </div>
 
@@ -377,7 +385,7 @@
           <div class="val num" id="holdDay">—</div></div>
       </div>
       <div class="hold-head">
-        <span>基金 / 持有金额</span><span>当日收益</span><span>板块</span><span>近30天</span>
+        <span>基金 / 持有金额</span><span>当日收益</span><span>板块</span><span>持有收益</span>
       </div>
       <div id="holdRows"></div>
     </div>
@@ -396,8 +404,8 @@
     <div class="card">
       <h3>GitHub 写入（手机上保存基金清单需要）</h3>
       <div class="row2">
-        <div class="field"><label>仓库 owner/repo</label>
-          <input id="sRepo" placeholder="511678/fund-portfolio"></div>
+        <div class="field"><label>仓库 owner/repo（已预填，注意是双横线 fund--portfolio）</label>
+          <input id="sRepo" placeholder="511678/fund--portfolio"></div>
         <div class="field"><label>Personal Access Token（fine-grained，仅此仓库）</label>
           <input id="sPat" type="password" placeholder="github_pat_…"></div>
       </div>
@@ -487,10 +495,15 @@ let live    = {};                  // 盘中实时：{code:{NAV,NAVCHGRT,PDATE,G
 
 const $ = id => document.getElementById(id);
 const cssv = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const fmtN = n => n.toLocaleString("zh-CN", {maximumFractionDigits:0});
-const fmtY = n => "¥" + (Math.abs(n) >= 10000 ? (n/10000).toFixed(2) + "万" : fmtN(n));
+const fmtY = n => "¥" + (Math.abs(n) >= 10000 ? (n/10000).toFixed(2) + "万"
+  : n.toLocaleString("zh-CN", {minimumFractionDigits:2, maximumFractionDigits:2}));
 const sign = (n, d=1) => (n>0?"+":"") + n.toFixed(d) + "%";
 const cls  = n => n>0 ? "up" : n<0 ? "down" : "";
+const f2m  = n => {          // 盈亏金额：+1,234.56（消 -0）
+  const r = Math.round(n * 100) / 100;
+  if (r === 0) return "+0.00";
+  return (r > 0 ? "+" : "") + r.toLocaleString("zh-CN", {maximumFractionDigits:2, minimumFractionDigits:2});
+};
 function toast(msg) { const t=$("toast"); t.textContent=msg; t.classList.add("on");
   setTimeout(()=>t.classList.remove("on"), 2600); }
 
@@ -509,6 +522,32 @@ document.addEventListener("click", e => {
 });
 
 /* ================= 数据加载 ================= */
+/* 某基金净值序列最新日（无数据返回 null） */
+function latestNavDate(code) {
+  const nav = market?.funds?.[code]?.nav_history || [];
+  return nav.length ? nav[nav.length - 1].d : null;
+}
+/* 账本同步：把市值快照按净值滚到最新净值日并落库。
+   快照日优先 amounts[c].d；旧数据无 d 时用 fundsCfg.added（迁移）；两者都没有则视为最新快照。 */
+function syncValues() {
+  if (!market) return;
+  let changed = false;
+  for (const c of Object.keys(amounts)) {
+    const rec = amounts[c];
+    if (!rec || !(rec.amt > 0)) continue;
+    const nav = market.funds?.[c]?.nav_history || [];
+    if (!nav.length) continue;
+    const d1 = nav[nav.length - 1].d;
+    const d0 = rec.d || fundsCfg.find(f => f.code === c)?.added;
+    if (d0 && d1 > d0) {
+      rec.amt = FP.rolledAmt(rec.amt, nav, d0);
+      rec.d = d1; changed = true;
+    } else if (!rec.d) {
+      rec.d = d1; changed = true;   // 无快照日可滚 → 快照视为最新
+    }
+  }
+  if (changed) lsSet(LS.amt, amounts);
+}
 async function loadData() {
   try {
     const [m, f] = await Promise.all([
@@ -523,6 +562,7 @@ async function loadData() {
     if (c) { market = c.market; fundsCfg = c.fundsCfg || [];
       toast("网络异常，显示缓存数据"); }
   }
+  syncValues();
   renderDash();
 }
 
@@ -653,6 +693,23 @@ function renderDash() {
   if (pW > 0) c.todayPct = pSum / pW * 100;
   $("updBadge").textContent = market ? "更新于 " + (market.updated_at||"") : "无数据（缓存）";
   $("heroAmt").textContent = fmtY(c.total);
+  // 组合累计盈亏 = Σ(最新市值 − 成本)；未录成本的基金不计入
+  let pnlSum = 0, costSum = 0, noCost = 0;
+  for (const c2 of Object.keys(c.perFund)) {
+    const cost = amounts[c2]?.cost;
+    if (cost == null) { noCost++; continue; }
+    pnlSum += amounts[c2].amt - cost; costSum += cost;
+  }
+  const hp = $("heroPnl");
+  if (costSum > 0) {
+    hp.innerHTML = `累计盈亏 <b>${f2m(pnlSum)}</b>` +
+      (noCost ? `<span class="sub">${noCost}只未录成本</span>` : "");
+    hp.className = "hero-pnl num " + cls(pnlSum);
+  } else {
+    hp.innerHTML = `累计盈亏 <b>—</b>` +
+      `<span class="sub">在明细页补录累计投入成本后显示</span>`;
+    hp.className = "hero-pnl num";
+  }
   $("heroToday").textContent = `今日 ${sign(c.todayPct)} ｜ 近30天 ${sign(c.w30)}`;
   $("heroToday").className = "hero-delta num " + cls(c.todayPct);
   $("kpiToday").textContent = fmtY(c.total * c.todayPct / 100);
@@ -749,15 +806,15 @@ function renderDash() {
 function renderHoldings() {
   const rows = Object.keys(amounts).filter(c => amounts[c].amt > 0).map(c => {
     const t = fundToday(c), mb = fundMainBucket(c);
-    const ps = (market?.funds?.[c]?.nav_history || []).map(p => p.pct).filter(p => p != null).slice(-30);
-    let w30 = null;
-    if (ps.length >= 2) { let i = 100; for (const p of ps) i *= 1 + p/100; w30 = i - 100; }
-    return {c, amt: amounts[c].amt,
-      name: amounts[c].name || market?.funds?.[c]?.name || c,
-      dayPct: t?.pct ?? null, dayAmt: t?.pct != null ? amounts[c].amt * t.pct / 100 : null,
+    const rec = amounts[c];
+    const cost = rec.cost ?? null;
+    const pnl = cost == null ? null : rec.amt - cost;   // rec.amt 已由 syncValues 滚到最新净值日
+    const pnlPct = pnl == null ? null : (cost > 0 ? pnl / cost * 100 : 0);
+    return {c, amt: rec.amt,
+      name: rec.name || market?.funds?.[c]?.name || c,
+      dayPct: t?.pct ?? null, dayAmt: t?.pct != null ? rec.amt * t.pct / 100 : null,
       src: t?.src, date: t?.date, stale: !!t?.stale,
-      bucket: mb.bucket, sub: mb.sub, w30,
-      w30Amt: w30 != null ? amounts[c].amt * w30 / 100 : null};
+      bucket: mb.bucket, sub: mb.sub, cost, pnl, pnlPct};
   }).sort((a, b) => (b.dayAmt ?? -1e18) - (a.dayAmt ?? -1e18));
   const total = rows.reduce((a, r) => a + r.amt, 0);
   const daySum = rows.reduce((a, r) => a + (r.dayAmt || 0), 0);
@@ -779,36 +836,55 @@ function renderHoldings() {
         <div class="hsub num ${r.dayPct==null?"":cls(r.dayPct)}">${r.stale?"净值待更新":r.dayPct==null?"":sign(r.dayPct)+(r.src==="估值"?" 估":"")}</div></div>
       <div class="hcol"><div class="hsec"><span class="sw" style="background:${sv}"></span>${esc(r.bucket)}</div>
         <div class="hsub">${esc(r.sub||"")}</div></div>
-      <div class="hcol num ${r.w30==null?"":cls(r.w30)}">
-        <div>${r.w30Amt==null?"—":f2(r.w30Amt)}</div>
-        <div class="hsub num">${r.w30==null?"":sign(r.w30)}</div></div>
+      <div class="hcol num ${r.pnl==null?"":cls(r.pnl)}">
+        <div>${r.pnl==null?"—":f2(r.pnl)}</div>
+        <div class="hsub num ${r.pnl==null?"":cls(r.pnl)}">${r.pnl==null?"未录成本":sign(r.pnlPct, 2)}</div></div>
     </div>`; }).join("")
     : `<div class="hempty">暂无持仓，去「录入」添加基金</div>`;
 }
 function renderTxnView() {
   renderHoldings();
   const codes = Object.keys(amounts);
-  $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>兜底板块</th><th>金额</th><th></th></tr>" +
+  $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>兜底板块</th><th>金额</th><th>成本</th><th></th></tr>" +
     (codes.length ? codes.map(c => {
+      const cost = amounts[c].cost;
       return `<tr><td>${esc(amounts[c].name || market?.funds?.[c]?.name || c)}</td><td>${esc(c)}</td>
         <td>${esc(fundBucketFallback(c))}</td><td class="num">${fmtY(amounts[c].amt)}</td>
-        <td><button class="btn del-fund" data-code="${esc(c)}"
+        <td class="num">${cost == null ? `<span style="color:var(--ink-3)">未录</span>` : fmtY(cost)}</td>
+        <td><button class="btn b-mini set-cost" data-code="${esc(c)}" title="修改累计投入成本">✎ 成本</button>
+        <button class="btn b-mini del-fund" data-code="${esc(c)}"
           style="padding:3px 10px;font-size:12px">删除</button></td></tr>`; }).join("")
-    : "<tr><td colspan=5 style='text-align:center;color:var(--ink-3)'>暂无</td></tr>");
+    : "<tr><td colspan=6 style='text-align:center;color:var(--ink-3)'>暂无</td></tr>");
   $("txnTable").innerHTML = "<tr><th>日期</th><th>基金</th><th>动作</th><th>金额</th></tr>" +
     (txns.length ? txns.slice().reverse().map(t =>
       `<tr><td>${esc(t.d)}</td><td>${esc(t.name || t.code)}</td><td>${esc(t.action)}</td>
        <td class="num">${fmtY(t.amount)}</td></tr>`).join("")
     : "<tr><td colspan=4 style='text-align:center;color:var(--ink-3)'>暂无</td></tr>");
 }
-/* 删除按钮用事件委托（不用内联 onclick，防 JS 上下文注入） */
+/* 操作按钮用事件委托（不用内联 onclick，防 JS 上下文注入） */
 document.addEventListener("click", e => {
-  const b = e.target.closest(".del-fund");
-  if (b) delFund(b.dataset.code);
+  const b = e.target.closest("[data-code]");
+  if (!b) return;
+  if (b.classList.contains("del-fund")) delFund(b.dataset.code);
+  else if (b.classList.contains("set-cost")) setCost(b.dataset.code);
 });
 window.delFund = c => {
   if (!confirm(`删除 ${amounts[c]?.name || c} 及其金额记录？`)) return;
   delete amounts[c]; lsSet(LS.amt, amounts); renderTxnView(); renderDash();
+};
+window.setCost = c => {
+  const rec = amounts[c];
+  if (!rec) return;
+  const cur = rec.cost == null ? "" : rec.cost;
+  const v = prompt(`「${rec.name || c}」的累计投入成本（元）\n留空 = 标记未录`, cur);
+  if (v == null) return;
+  if (v.trim() === "") rec.cost = null;
+  else {
+    const n = parseFloat(v);
+    if (!(n > 0)) return toast("成本需为大于 0 的金额");
+    rec.cost = FP.round2(n);
+  }
+  lsSet(LS.amt, amounts); renderTxnView(); renderDash(); toast("成本已更新");
 };
 
 /* ================= 录入：新基金 ================= */
@@ -841,19 +917,27 @@ async function lookupFund(code) {
 $("btnAddFund").onclick = async () => {
   const code = $("nCode").value.trim(), name = $("nName").value.trim();
   const amt = parseFloat($("nAmt").value);
+  const costIn = parseFloat($("nCost").value);
+  const costFilled = $("nCost").value.trim() !== "";
   if (!/^\d{6}$/.test(code)) return toast("请输入6位基金代码");
   if (!name) return toast("请填写基金名称");
   if (!(amt > 0)) return toast("请填写金额");
+  if (costFilled && !(costIn > 0)) return toast("成本需为大于 0 的金额，或留空开账");
   const fb = $("nFallback").value;
   $("btnAddFund").disabled = true; $("addMsg").textContent = "保存中…";
   const ok = await ghWriteFunds(cfg => {
     if (!cfg.find(f => f.code === code)) cfg.push({code, fallback:fb, added:todayLocal()});
     return cfg;
   });
-  amounts[code] = {amt, name}; lsSet(LS.amt, amounts);
+  // 成本：显式填了用之；留空则保留原成本，原本也没有就按市值开账（盈亏从今天起算）
+  const prev = amounts[code];
+  amounts[code] = {amt, name,
+    cost: costFilled ? FP.round2(costIn) : (prev?.cost ?? FP.openBook(amt)),
+    d: latestNavDate(code) || todayLocal()};
+  lsSet(LS.amt, amounts);
   $("btnAddFund").disabled = false;
   $("addMsg").textContent = ok ? "✓ 已保存" : "⚠️ 金额已存本机；清单写入 GitHub 失败（去设置里检查 Token），下次连网重试即可";
-  if (ok) { $("nCode").value = $("nName").value = $("nAmt").value = "";
+  if (ok) { $("nCode").value = $("nName").value = $("nAmt").value = $("nCost").value = "";
     $("nLookup").textContent = "输入完整代码后自动查询名称";
     fundsCfg.push({code, fallback:fb}); renderDash(); }
 };
@@ -870,11 +954,23 @@ $("btnAddTxn").onclick = () => {
   const code = $("tFund").value, amt = parseFloat($("tAmt").value);
   if (!code) return toast("请先添加基金");
   if (!(amt > 0)) return toast("请填写金额");
+  if (!amounts[code]) return toast("先在左侧添加基金并填市值");
+  const a = $("tAction").value;
+  const sell = a === "卖出" || a === "减仓";
+  syncValues();   // 先把旧市值滚到最新净值日，再记账
+  const rec = amounts[code];
+  if (sell) Object.assign(rec, FP.applySell(rec.cost, rec.amt, amt));
+  else Object.assign(rec, FP.applyBuy(rec.cost, rec.amt, amt));
+  const d1 = latestNavDate(code);
+  if (d1) rec.d = d1;
+  lsSet(LS.amt, amounts);
   txns.push({d: $("tDate").value || todayLocal(),
-    code, name: amounts[code]?.name, action: $("tAction").value, amount: amt});
+    code, name: rec.name, action: a, amount: amt});
   lsSet(LS.txn, txns);
-  $("tAmt").value = ""; $("txnMsg").textContent = "✓ 已记录（本机）";
-  toast("交易已记录");
+  $("tAmt").value = "";
+  $("txnMsg").textContent = "✓ 已记账，市值/成本已更新";
+  toast(`${a} ${fmtY(amt)} · 市值 ${fmtY(rec.amt)}`);
+  renderDash();
 };
 
 /* ================= GitHub 写入 ================= */
@@ -926,10 +1022,11 @@ function compressImage(dataUrl, maxW, cb) {
 const VISION_PROMPT = `你是基金App截图识别助手（蚂蚁基金/天天基金/支付宝等）。先判断截图类型，再提取持仓基金：
 1. 持仓列表、资产详情、持有页：提取每只基金的代码、名称、持有金额。
 2. 金额必须取「持有金额」；若页面显示「待确认金额」（顶部总额=持有金额+待确认金额），绝不能把待确认部分算进金额。
-3. 收益明细、业绩走势、交易记录、排行榜、搜索页等没有持仓信息的页面，输出 []。
-4. 同一只基金出现多行（不同份额/账户）要分别列出。看不到6位代码就填空串。
+3. 若页面显示「持仓成本价/持有成本/成本/累计投入」，把该基金的累计投入成本（元）填入 cost 字段；没有成本信息就省略 cost。
+4. 收益明细、业绩走势、交易记录、排行榜、搜索页等没有持仓信息的页面，输出 []。
+5. 同一只基金出现多行（不同份额/账户）要分别列出。看不到6位代码就填空串。
 只输出纯JSON数组，不要markdown代码块、不要解释：
-[{"code":"6位数字","name":"基金全称","amount":123.45}]`;
+[{"code":"6位数字","name":"基金全称","amount":123.45,"cost":100.00}]`;
 function zhipuModels() {
   return [...new Set([settings.zmodel, "glm-4.6v-flash", "glm-4.5v-flash", "glm-4v-flash"]
     .map(s => (s||"").trim()).filter(Boolean))];
@@ -963,7 +1060,8 @@ async function zhipuVision(b64) {
       const items = JSON.parse(mt[0])
         .filter(x => x && (x.name || x.code))
         .map(x => ({code:String(x.code||"").replace(/\D/g,"").slice(0,6),
-          name:x.name||"", amount:+x.amount||0, action:"持仓"}));
+          name:x.name||"", amount:+x.amount||0,
+          cost: +x.cost > 0 ? FP.round2(+x.cost) : 0, action:"持仓"}));
       if (!items.length) { $("chMsg").textContent = "✓ 识别成功：此页面没有持仓（收益明细/走势等页）"; return; }
       showConfirm(`图片识别结果 · 模型 ${m}`, items);
       $("chMsg").textContent = "";
@@ -1025,29 +1123,32 @@ let confirmItems = [];
 function showConfirm(title, items) {
   confirmItems = items;
   $("modalTitle").textContent = title;
-  // it.code/name/amount 来自截图识别（LLM 输出）或语音文本，不可信，必须转义
+  // it.code/name/amount/cost 来自截图识别（LLM 输出）或语音文本，不可信，必须转义
   $("modalBody").innerHTML = `<table class="data confirm-tbl">
-    <tr><th>代码</th><th>名称</th><th>动作</th><th>金额</th></tr>` +
+    <tr><th>代码</th><th>名称</th><th>动作</th><th>市值</th><th>成本(可选)</th></tr>` +
     items.map((it,i) => `<tr>
       <td><input id="cf_c${i}" value="${esc(it.code||"")}" maxlength="6" inputmode="numeric"></td>
       <td><input id="cf_n${i}" value="${esc(it.name||"")}"></td>
-      <td><select id="cf_a${i}">${["买入","卖出","定投","加仓","减仓","持仓"]
+      <td><select id="cf_a${i}">${["持仓","买入","卖出","定投","加仓","减仓"]
         .map(a => `<option ${a===(it.action||"持仓")?"selected":""}>${a}</option>`).join("")}</select></td>
-      <td><input id="cf_m${i}" value="${esc(it.amount||"")}" inputmode="decimal"></td></tr>`).join("") +
-    `</table><div class="hint">确认/修正后入库：已存在的基金按所选动作更新金额；新基金先入清单。
+      <td><input id="cf_m${i}" value="${esc(it.amount||"")}" inputmode="decimal"></td>
+      <td><input id="cf_o${i}" value="${esc(it.cost||"")}" inputmode="decimal"
+        placeholder="留空=按市值开账"></td></tr>`).join("") +
+    `</table><div class="hint">确认/修正后入库：「持仓」=更新市值快照；买/卖类动作会同步更新市值与成本。
     同一基金多行（不同份额）会自动合并金额。</div>`;
   $("modalBg").classList.add("on");
 }
 $("modalCancel").onclick = () => $("modalBg").classList.remove("on");
 $("modalOk").onclick = async () => {
-  // 读取所有行
+  // 读取所有行（市值 + 可选成本）
   const rows = [];
   for (let i = 0; i < confirmItems.length; i++) {
     const code = $("cf_c"+i).value.trim(), name = $("cf_n"+i).value.trim();
     const amt = parseFloat($("cf_m"+i).value) || 0;
+    const cost = parseFloat($("cf_o"+i).value) || 0;   // 0 = 未填
     const action = $("cf_a"+i).value;
     if (!name && !code) continue;
-    rows.push({code, name, amt, action});
+    rows.push({code, name, amt, cost, action});
   }
   // 同一代码多行（同基金不同份额的截图）→ 合并为一条，金额按方向相加
   const merged = new Map();
@@ -1057,8 +1158,10 @@ $("modalOk").onclick = async () => {
     const m = merged.get(k);
     const sell = r.action === "卖出" || r.action === "减仓";
     m.amt = sell ? m.amt - r.amt : m.amt + r.amt;
+    if (r.cost > 0) m.cost = r.cost;   // 成本取最后填写的非空值
   }
   if (merged.size < rows.length) toast("同一基金的多行已合并金额");
+  syncValues();   // 旧市值先滚到最新净值日，再按动作入账
   for (const m of merged.values()) {
     let c = m.code;
     if (c) {   // 手填代码也清洗为纯数字，保证 amounts 的 key 恒为 6 位数字
@@ -1074,14 +1177,22 @@ $("modalOk").onclick = async () => {
       else fundsCfg.push({code:c, fallback:"综合"});
     }
     if (!c) continue;
-    if (m.action !== "持仓") txns.push({d:todayLocal(),
-      code:c, name:m.name, action:m.action, amount:m.amt});
-    if (m.amt !== 0) {
-      const old = amounts[c]?.amt || 0;
-      const val = (m.action === "卖出" || m.action === "减仓") ? old - m.amt
-        : m.action === "持仓" ? m.amt : old + m.amt;
-      amounts[c] = {amt: Math.max(val, 0), name: m.name || amounts[c]?.name || ""};
+    const rec = amounts[c] || {amt: 0, cost: null, name: ""};
+    const sell = m.action === "卖出" || m.action === "减仓";
+    const holding = m.action === "持仓";
+    if (holding) {
+      // 持仓快照：直接设市值；成本填了用它，否则保留原成本或按市值开账
+      rec.amt = Math.max(m.amt, 0);
+      rec.cost = m.cost > 0 ? m.cost : (rec.cost ?? FP.openBook(rec.amt));
+    } else if (m.amt !== 0) {
+      if (sell) Object.assign(rec, FP.applySell(rec.cost, rec.amt, Math.max(m.amt, 0)));
+      else Object.assign(rec, FP.applyBuy(rec.cost, rec.amt, Math.max(m.amt, 0)));
+      txns.push({d:todayLocal(), code:c, name:m.name, action:m.action, amount:Math.abs(m.amt)});
     }
+    rec.name = m.name || rec.name || "";
+    const d1 = latestNavDate(c);
+    rec.d = d1 || todayLocal();
+    amounts[c] = rec;
   }
   lsSet(LS.amt, amounts); lsSet(LS.txn, txns);
   $("modalBg").classList.remove("on");
@@ -1144,7 +1255,11 @@ $("fileImport").onchange = e => {
         const k = String(c).replace(/\D/g, "").slice(0, 6);
         const amt = +v?.amt;
         if (!/^\d{6}$/.test(k) || !(amt >= 0)) continue;
-        clean[k] = {amt, name: String(v?.name ?? "").slice(0, 60)};
+        const rec = {amt, name: String(v?.name ?? "").slice(0, 60)};
+        const cost = +v?.cost;                    // 成本/快照日可选
+        if (cost > 0) rec.cost = FP.round2(cost);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(v?.d || ""))) rec.d = v.d;
+        clean[k] = rec;
       }
       amounts = clean; lsSet(LS.amt, amounts);
     }
@@ -1173,14 +1288,15 @@ $("themeBtn").onclick = () => {
 
 /* ================= 启动 ================= */
 (function init() {
-  $("sRepo").value = settings.repo ||
-    (location.hostname.endsWith("github.io")
-      ? location.hostname.split(".")[0] + "/" + location.pathname.split("/")[1]
-      : "");
+  const DEF_REPO = "511678/fund--portfolio";   // 双横线
+  const inferredRepo = location.hostname.endsWith("github.io")
+    ? location.hostname.split(".")[0] + "/" + location.pathname.split("/")[1]
+    : DEF_REPO;
+  $("sRepo").value = settings.repo || inferredRepo;
   $("sPat").value = settings.pat || "";
   $("sZkey").value = settings.zkey || "";
   $("sZmodel").value = settings.zmodel || "glm-4.6v-flash";
-  $("ftRepo").textContent = settings.repo || "";
+  $("ftRepo").textContent = $("sRepo").value;
   loadData();
   fetchLive();
 })();

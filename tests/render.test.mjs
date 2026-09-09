@@ -12,6 +12,7 @@ import { JSDOM } from "jsdom";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const HTML = readFileSync(join(ROOT, "index.html"), "utf8");
+const CORE = readFileSync(join(ROOT, "js", "core.js"), "utf8");
 const market = JSON.parse(readFileSync(join(ROOT, "data", "market.json"), "utf8"));
 const funds = JSON.parse(readFileSync(join(ROOT, "data", "funds.json"), "utf8"));
 
@@ -25,17 +26,18 @@ async function loadPage() {
     resources: "usable",          // 让 <img> 的 onerror 真正可触发（红绿验证关键）
     pretendToBeVisual: true,
     beforeParse(window) {
-      window.setInterval = () => 0;   // 页面 60s 轮询会让测试进程挂起，屏蔽
+      window.setInterval = () => 0;          // 页面 60s 轮询会让测试进程挂起，屏蔽
+      window.eval(CORE);                     // jsdom 不走 window.fetch 加载子资源，core.js 从磁盘注入
+      // mock 网络：market/funds 用真实仓库数据，外部接口一律拒绝
+      window.fetch = async url => {
+        const u = String(url);
+        if (u.includes("market.json")) return { ok: true, status: 200, json: async () => market };
+        if (u.includes("funds.json")) return { ok: true, status: 200, json: async () => funds };
+        throw new TypeError("network blocked in test: " + u);
+      };
     },
   });
   const { window } = dom;
-  // mock 网络：market/funds 用真实仓库数据，外部接口一律拒绝
-  window.fetch = async url => {
-    const u = String(url);
-    if (u.includes("market.json")) return { ok: true, status: 200, json: async () => market };
-    if (u.includes("funds.json")) return { ok: true, status: 200, json: async () => funds };
-    throw new TypeError("network blocked in test: " + u);
-  };
   // 等主脚本 + loadData 渲染完成
   await new Promise(r => window.addEventListener("load", r));
   await new Promise(r => setTimeout(r, 80));
@@ -78,7 +80,7 @@ test("XSS：恶意基金名在持仓/明细/图例渲染为文本，不产生元
   assert.equal(inp.value, XSS_NAME, "input.value 应还原原文（&quot; 解码回引号）");
   // 逃逸检测：若引号未被转义，属性在 onerror= 处提前终止，行结构会被破坏且 onerror 触发
   assert.equal(doc.querySelectorAll("#modalBody tr").length, 2, "表头+1 数据行（结构未被 payload 破坏）");
-  assert.equal(doc.querySelectorAll("#modalBody input, #modalBody select").length, 4, "行内应恰好 4 个控件");
+  assert.equal(doc.querySelectorAll("#modalBody input, #modalBody select").length, 5, "行内应恰好 5 个控件（代码/名称/动作/市值/成本）");
   assert.equal(doc.title, "基金板块分析", "value 属性注入不得改写 document.title");
   // "我的基金"表（原内联 onclick 注入点）——按钮应为 data-code 委托式
   const delBtn = doc.querySelector(".del-fund");

@@ -62,6 +62,58 @@
   }
 
   const core = { INDUSTRY_RULES, bucketOf, fundMainBucket, esc, todayLocal, isFreshNav };
+
+  /* ============ 账本（成本/盈亏） ============
+     amounts[c] = {amt 市值快照, cost 累计投入成本, d 快照对应净值日 YYYY-MM-DD}
+     盈亏 = amt − cost；cost 未录 = null（不参与组合盈亏，不显示误导性 0）。 */
+
+  const round2 = n => Math.round(n * 100) / 100;
+
+  /* 快照市值滚到最新净值日：对 nav 中日期 > fromDate 的每日涨跌累乘。
+     fromDate 早于数据起点则滚可见段；无更新（fromDate ≥ 最新日）返回 null。 */
+  function rollFactor(nav, fromDate) {
+    if (!Array.isArray(nav) || !nav.length || !fromDate) return null;
+    const lastD = nav[nav.length - 1].d;
+    if (fromDate >= lastD) return null;
+    let f = 1;
+    for (const p of nav) {
+      if (p.d > fromDate && p.pct != null) f *= 1 + p.pct / 100;
+    }
+    return f === 1 ? null : f;
+  }
+
+  /* 滚动后的市值（无更新或不可滚则原值） */
+  function rolledAmt(amt, nav, fromDate) {
+    const f = rollFactor(nav, fromDate);
+    return f == null ? amt : round2(amt * f);
+  }
+
+  /* 开账：新基金未填成本时按市值开账（盈亏从入账日起算） */
+  const openBook = amt => round2(amt);
+
+  /* 买入/加仓/定投：追加投入 → 成本与市值同增 */
+  function applyBuy(cost, amt, add) {
+    return {cost: round2((cost || 0) + add), amt: round2(amt + add)};
+  }
+
+  /* 卖出/减仓：成本按「卖出额 ÷ 卖出前市值」比例摊减（平均成本近似）。
+     cost 未录(null) 时保持 null——不知道成本就不能凭空造出 0 成本。 */
+  function applySell(cost, amt, sell) {
+    const p = amt > 0 ? Math.min(sell / amt, 1) : 1;
+    return {
+      cost: cost == null ? null : round2(cost * (1 - p)),
+      amt: Math.max(round2(amt - sell), 0),
+    };
+  }
+
+  /* 每基金持有收益口径：cost 缺失 → {pnl:null} */
+  function pnlOf(amtCur, cost) {
+    if (cost == null || cost < 0) return {pnl: null, pct: null};
+    const pnl = round2(amtCur - cost);
+    return {pnl, pct: cost > 0 ? round2(pnl / cost * 100) : 0};
+  }
+
+  Object.assign(core, {round2, rollFactor, rolledAmt, openBook, applyBuy, applySell, pnlOf});
   if (typeof module !== "undefined" && module.exports) module.exports = core;
   else g.FP = Object.assign({}, g.FP, core);
 })(typeof window !== "undefined" ? window : globalThis);
