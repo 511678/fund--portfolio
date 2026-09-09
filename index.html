@@ -513,6 +513,7 @@ function navTo(name) {
   $("view-" + name).classList.add("on");
   document.querySelectorAll("[data-nav]").forEach(a =>
     a.classList.toggle("on", a.dataset.nav === name));
+  if (name === "dash") renderDash();   // 录入/明细改了数据后切回总览要重渲
   if (name === "txn") renderTxnView();
   if (name === "entry") refreshFundSelect();
 }
@@ -937,9 +938,10 @@ $("btnAddFund").onclick = async () => {
   lsSet(LS.amt, amounts);
   $("btnAddFund").disabled = false;
   $("addMsg").textContent = ok ? "✓ 已保存" : "⚠️ 金额已存本机；清单写入 GitHub 失败（去设置里检查 Token），下次连网重试即可";
-  if (ok) { $("nCode").value = $("nName").value = $("nAmt").value = $("nCost").value = "";
-    $("nLookup").textContent = "输入完整代码后自动查询名称";
-    fundsCfg.push({code, fallback:fb}); renderDash(); }
+  $("nCode").value = $("nName").value = $("nAmt").value = $("nCost").value = "";
+  $("nLookup").textContent = "输入完整代码后自动查询名称";
+  if (ok) fundsCfg.push({code, fallback:fb});
+  renderDash();   // 无论清单是否写入成功，金额都已落库，总览必须刷新
 };
 
 /* ================= 录入：交易 ================= */

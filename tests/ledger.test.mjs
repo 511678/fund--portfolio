@@ -205,3 +205,18 @@ test("回归：GitHub 仓库预填（双横线）", async () => {
   const doc = window.document;
   assert.equal(doc.getElementById("sRepo").value, "511678/fund--portfolio");
 });
+
+test("回归：无 PAT 录入基金后总览必须刷新（用户报障：总览空白）", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  // 未填 PAT → ghWriteFunds 必失败；金额仍须落库且总览可看
+  doc.getElementById("nCode").value = "020691";
+  doc.getElementById("nName").value = "通信设备指数A";
+  doc.getElementById("nAmt").value = "3000";
+  doc.getElementById("btnAddFund").click();
+  await new Promise(r => setTimeout(r, 60));
+  window.navTo("dash");
+  assert.ok(doc.getElementById("dashEmpty").classList.contains("hide"), "空状态应隐藏");
+  assert.ok(!doc.getElementById("dashBody").classList.contains("hide"), "数据区应显示");
+  assert.equal(doc.getElementById("heroAmt").textContent, "¥3,000.00");
+});
