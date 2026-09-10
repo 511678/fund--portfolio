@@ -46,12 +46,12 @@ test("applyBuy：成本与市值同增；null 成本自动开账", () => {
 });
 
 test("applySell：按比例摊减成本；超卖 clamp；null 成本保持 null", () => {
-  // 卖一半：cost/amt 各减半
-  assert.deepEqual(FP.applySell(1000, 2000, 1000), {cost: 500, amt: 1000});
-  // 超卖：amt clamp 0、成本摊完
-  assert.deepEqual(FP.applySell(1000, 2000, 5000), {cost: 0, amt: 0});
-  // 未录成本：不能凭空造 0 成本（假盈利）
-  assert.deepEqual(FP.applySell(null, 2000, 1000), {cost: null, amt: 1000});
+  // 卖一半：cost/amt 各减半，落袋 +500（卖1000，对应成本500）
+  assert.deepEqual(FP.applySell(1000, 2000, 1000), {cost: 500, amt: 1000, realizedDelta: 500});
+  // 超卖：按全部市值卖出处理，落袋不虚增
+  assert.deepEqual(FP.applySell(1000, 2000, 5000), {cost: 0, amt: 0, realizedDelta: 1000});
+  // 未录成本：不能凭空造出 0 成本（假盈利），落袋也无法计算
+  assert.deepEqual(FP.applySell(null, 2000, 1000), {cost: null, amt: 1000, realizedDelta: null});
 });
 
 test("pnlOf：盈亏与收益率；未录成本 → null", () => {

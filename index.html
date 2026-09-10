@@ -676,7 +676,8 @@ function compute() {
 
 /* ================= 渲染 ================= */
 function renderDash() {
-  const hasFund = Object.values(amounts).some(a => a.amt > 0);
+  // 有持仓，或有清仓后留下的已落袋记录，都算有账可看
+  const hasFund = Object.values(amounts).some(a => a.amt > 0 || a.realized);
   $("dashEmpty").classList.toggle("hide", hasFund);
   $("dashBody").classList.toggle("hide", !hasFund);
   if (!hasFund) { $("updBadge").textContent = market ? "更新于 " + (market.updated_at||"") : "无数据"; return; }
@@ -694,18 +695,26 @@ function renderDash() {
   if (pW > 0) c.todayPct = pSum / pW * 100;
   $("updBadge").textContent = market ? "更新于 " + (market.updated_at||"") : "无数据（缓存）";
   $("heroAmt").textContent = fmtY(c.total);
-  // 组合累计盈亏 = Σ(最新市值 − 成本)；未录成本的基金不计入
-  let pnlSum = 0, costSum = 0, noCost = 0;
-  for (const c2 of Object.keys(c.perFund)) {
-    const cost = amounts[c2]?.cost;
-    if (cost == null) { noCost++; continue; }
-    pnlSum += amounts[c2].amt - cost; costSum += cost;
+  // 组合累计盈亏 = Σ持有盈亏(市值−成本) + Σ已实现(卖出落袋)。
+  // 已落袋扫全部基金（含清仓 amt=0 的）；未录成本只统计仍在持仓的。
+  let pnlSum = 0, costSum = 0, noCost = 0, realizedSum = 0, hasRealized = false;
+  for (const c2 of Object.keys(amounts)) {
+    const rec = amounts[c2];
+    const cost = rec?.cost;
+    if (cost == null) { if ((rec?.amt || 0) > 0) noCost++; }
+    else { pnlSum += rec.amt - cost; costSum += cost; }
+    if (rec?.realized) { realizedSum += rec.realized; hasRealized = true; }
   }
   const hp = $("heroPnl");
-  if (costSum > 0) {
-    hp.innerHTML = `累计盈亏 <b>${f2m(pnlSum)}</b>` +
-      (noCost ? `<span class="sub">${noCost}只未录成本</span>` : "");
-    hp.className = "hero-pnl num " + cls(pnlSum);
+  if (costSum > 0 || hasRealized) {
+    const totalPnl = pnlSum + realizedSum;
+    const parts = [];
+    if (costSum > 0) parts.push(`持有 ${f2m(pnlSum)}`);
+    if (hasRealized) parts.push(`已落袋 ${f2m(realizedSum)}`);
+    hp.innerHTML = `累计盈亏 <b>${f2m(totalPnl)}</b>` +
+      (costSum > 0 ? `<span class="sub">${parts.join(" ｜ ")}${noCost ? ` ｜ ${noCost}只未录成本` : ""}</span>`
+        : `<span class="sub">${parts.join(" ｜ ")}</span>`);
+    hp.className = "hero-pnl num " + cls(totalPnl);
   } else {
     hp.innerHTML = `累计盈亏 <b>—</b>` +
       `<span class="sub">在明细页补录累计投入成本后显示</span>`;
@@ -815,7 +824,8 @@ function renderHoldings() {
       name: rec.name || market?.funds?.[c]?.name || c,
       dayPct: t?.pct ?? null, dayAmt: t?.pct != null ? rec.amt * t.pct / 100 : null,
       src: t?.src, date: t?.date, stale: !!t?.stale,
-      bucket: mb.bucket, sub: mb.sub, cost, pnl, pnlPct};
+      bucket: mb.bucket, sub: mb.sub, cost, pnl, pnlPct,
+      realized: rec.realized || 0};
   }).sort((a, b) => (b.dayAmt ?? -1e18) - (a.dayAmt ?? -1e18));
   const total = rows.reduce((a, r) => a + r.amt, 0);
   const daySum = rows.reduce((a, r) => a + (r.dayAmt || 0), 0);
@@ -839,23 +849,28 @@ function renderHoldings() {
         <div class="hsub">${esc(r.sub||"")}</div></div>
       <div class="hcol num ${r.pnl==null?"":cls(r.pnl)}">
         <div>${r.pnl==null?"—":f2(r.pnl)}</div>
-        <div class="hsub num ${r.pnl==null?"":cls(r.pnl)}">${r.pnl==null?"未录成本":sign(r.pnlPct, 2)}</div></div>
+        <div class="hsub num ${r.pnl==null?"":cls(r.pnl)}">${r.pnl==null?"未录成本":sign(r.pnlPct, 2)
+          + (r.realized ? ` · 落袋${f2(r.realized)}` : "")}</div></div>
     </div>`; }).join("")
     : `<div class="hempty">暂无持仓，去「录入」添加基金</div>`;
 }
 function renderTxnView() {
   renderHoldings();
   const codes = Object.keys(amounts);
-  $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>兜底板块</th><th>金额</th><th>成本</th><th></th></tr>" +
+  $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>兜底板块</th><th>金额</th><th>成本</th><th>已落袋</th><th></th></tr>" +
     (codes.length ? codes.map(c => {
       const cost = amounts[c].cost;
+      const realized = amounts[c].realized;
       return `<tr><td>${esc(amounts[c].name || market?.funds?.[c]?.name || c)}</td><td>${esc(c)}</td>
         <td>${esc(fundBucketFallback(c))}</td><td class="num">${fmtY(amounts[c].amt)}</td>
         <td class="num">${cost == null ? `<span style="color:var(--ink-3)">未录</span>` : fmtY(cost)}</td>
+        <td class="num ${realized ? cls(realized) : ""}">${realized
+          ? `<button class="btn b-mini set-realized" data-code="${esc(c)}" title="点击修正已实现盈亏">${f2m(realized)}</button>`
+          : `<button class="btn b-mini set-realized" data-code="${esc(c)}" title="补录历史卖出的已实现盈亏" style="color:var(--ink-3)">—</button>`}</td>
         <td><button class="btn b-mini set-cost" data-code="${esc(c)}" title="修改累计投入成本">✎ 成本</button>
         <button class="btn b-mini del-fund" data-code="${esc(c)}"
           style="padding:3px 10px;font-size:12px">删除</button></td></tr>`; }).join("")
-    : "<tr><td colspan=6 style='text-align:center;color:var(--ink-3)'>暂无</td></tr>");
+    : "<tr><td colspan=7 style='text-align:center;color:var(--ink-3)'>暂无</td></tr>");
   $("txnTable").innerHTML = "<tr><th>日期</th><th>基金</th><th>动作</th><th>金额</th></tr>" +
     (txns.length ? txns.slice().reverse().map(t =>
       `<tr><td>${esc(t.d)}</td><td>${esc(t.name || t.code)}</td><td>${esc(t.action)}</td>
@@ -868,9 +883,10 @@ document.addEventListener("click", e => {
   if (!b) return;
   if (b.classList.contains("del-fund")) delFund(b.dataset.code);
   else if (b.classList.contains("set-cost")) setCost(b.dataset.code);
+  else if (b.classList.contains("set-realized")) setRealized(b.dataset.code);
 });
 window.delFund = c => {
-  if (!confirm(`删除 ${amounts[c]?.name || c} 及其金额记录？`)) return;
+  if (!confirm(`删除 ${amounts[c]?.name || c} 及其金额、已落袋记录？`)) return;
   delete amounts[c]; lsSet(LS.amt, amounts); renderTxnView(); renderDash();
 };
 window.setCost = c => {
@@ -886,6 +902,21 @@ window.setCost = c => {
     rec.cost = FP.round2(n);
   }
   lsSet(LS.amt, amounts); renderTxnView(); renderDash(); toast("成本已更新");
+};
+/* 已实现盈亏可正可负（卖出亏损），可手动补录/修正历史卖出 */
+window.setRealized = c => {
+  const rec = amounts[c];
+  if (!rec) return;
+  const cur = rec.realized == null ? "" : rec.realized;
+  const v = prompt(`「${rec.name || c}」的已实现盈亏（元，卖出所得−卖出部分成本）\n留空 = 清零`, cur);
+  if (v == null) return;
+  if (v.trim() === "") delete rec.realized;
+  else {
+    const n = parseFloat(v);
+    if (!isFinite(n)) return toast("请输入数字");
+    rec.realized = FP.round2(n);
+  }
+  lsSet(LS.amt, amounts); renderTxnView(); renderDash(); toast("已落袋已更新");
 };
 
 /* ================= 录入：新基金 ================= */
@@ -961,8 +992,16 @@ $("btnAddTxn").onclick = () => {
   const sell = a === "卖出" || a === "减仓";
   syncValues();   // 先把旧市值滚到最新净值日，再记账
   const rec = amounts[code];
-  if (sell) Object.assign(rec, FP.applySell(rec.cost, rec.amt, amt));
-  else Object.assign(rec, FP.applyBuy(rec.cost, rec.amt, amt));
+  if (sell) {
+    const r = FP.applySell(rec.cost, rec.amt, amt);
+    Object.assign(rec, {cost: r.cost, amt: r.amt});
+    if (r.realizedDelta != null) {          // 卖出落袋：卖出所得 − 卖出部分成本
+      rec.realized = FP.round2((rec.realized || 0) + r.realizedDelta);
+      toast(`${a} 落袋 ${f2m(r.realizedDelta)} 元`);
+    }
+  } else {
+    Object.assign(rec, FP.applyBuy(rec.cost, rec.amt, amt));
+  }
   const d1 = latestNavDate(code);
   if (d1) rec.d = d1;
   lsSet(LS.amt, amounts);
@@ -971,7 +1010,6 @@ $("btnAddTxn").onclick = () => {
   lsSet(LS.txn, txns);
   $("tAmt").value = "";
   $("txnMsg").textContent = "✓ 已记账，市值/成本已更新";
-  toast(`${a} ${fmtY(amt)} · 市值 ${fmtY(rec.amt)}`);
   renderDash();
 };
 
@@ -1187,8 +1225,14 @@ $("modalOk").onclick = async () => {
       rec.amt = Math.max(m.amt, 0);
       rec.cost = m.cost > 0 ? m.cost : (rec.cost ?? FP.openBook(rec.amt));
     } else if (m.amt !== 0) {
-      if (sell) Object.assign(rec, FP.applySell(rec.cost, rec.amt, Math.max(m.amt, 0)));
-      else Object.assign(rec, FP.applyBuy(rec.cost, rec.amt, Math.max(m.amt, 0)));
+      if (sell) {
+        const r = FP.applySell(rec.cost, rec.amt, Math.max(m.amt, 0));
+        Object.assign(rec, {cost: r.cost, amt: r.amt});
+        if (r.realizedDelta != null)
+          rec.realized = FP.round2((rec.realized || 0) + r.realizedDelta);
+      } else {
+        Object.assign(rec, FP.applyBuy(rec.cost, rec.amt, Math.max(m.amt, 0)));
+      }
       txns.push({d:todayLocal(), code:c, name:m.name, action:m.action, amount:Math.abs(m.amt)});
     }
     rec.name = m.name || rec.name || "";
@@ -1258,9 +1302,12 @@ $("fileImport").onchange = e => {
         const amt = +v?.amt;
         if (!/^\d{6}$/.test(k) || !(amt >= 0)) continue;
         const rec = {amt, name: String(v?.name ?? "").slice(0, 60)};
-        const cost = +v?.cost;                    // 成本/快照日可选
+        const cost = +v?.cost;                    // 成本/快照日/已落袋可选
         if (cost > 0) rec.cost = FP.round2(cost);
         if (/^\d{4}-\d{2}-\d{2}$/.test(String(v?.d || ""))) rec.d = v.d;
+        const realized = +v?.realized;
+        if (v?.realized != null && v.realized !== "" && isFinite(realized))
+          rec.realized = FP.round2(realized);
         clean[k] = rec;
       }
       amounts = clean; lsSet(LS.amt, amounts);

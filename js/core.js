@@ -97,12 +97,17 @@
   }
 
   /* 卖出/减仓：成本按「卖出额 ÷ 卖出前市值」比例摊减（平均成本近似）。
-     cost 未录(null) 时保持 null——不知道成本就不能凭空造出 0 成本。 */
+     realizedDelta = 卖出所得 − 卖出部分成本 = 本次落袋的已实现盈亏；
+     cost 未录(null) 时保持 null、realizedDelta 也为 null——不知道成本
+     就不能凭空造出 0 成本或 0 盈亏。 */
   function applySell(cost, amt, sell) {
-    const p = amt > 0 ? Math.min(sell / amt, 1) : 1;
+    const s = Math.min(sell, amt);   // 实际到账不能超过市值，防超卖虚增落袋
+    const p = amt > 0 ? s / amt : 1;
+    const costSold = cost == null ? null : round2(cost * p);
     return {
-      cost: cost == null ? null : round2(cost * (1 - p)),
-      amt: Math.max(round2(amt - sell), 0),
+      cost: cost == null ? null : round2(cost - costSold),
+      amt: Math.max(round2(amt - s), 0),
+      realizedDelta: costSold == null ? null : round2(s - costSold),
     };
   }
 
