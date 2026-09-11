@@ -148,6 +148,7 @@
   table.data th:first-child, table.data td:first-child { text-align:left; }
   table.data td { text-align:right; padding:7px 8px; border-bottom:1px solid var(--grid);
     font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .tbl-scroll { overflow-x:auto; }   /* 手机上宽表格横向滚动而非截断 */
 
   /* 空状态 */
   .empty { text-align:center; padding:56px 20px; color:var(--ink-2); }
@@ -391,11 +392,11 @@
     </div>
     <div class="card" style="margin-top:14px">
       <h3>我的基金 · 金额只存本机</h3>
-      <table class="data" id="myFundsTable"></table>
+      <div class="tbl-scroll"><table class="data" id="myFundsTable"></table></div>
     </div>
     <div class="card" style="margin-top:14px">
       <h3>交易记录（本机）</h3>
-      <table class="data" id="txnTable"></table>
+      <div class="tbl-scroll"><table class="data" id="txnTable"></table></div>
     </div>
   </section>
 
@@ -551,9 +552,16 @@ function syncValues() {
 }
 async function loadData() {
   try {
+    // 8 秒超时：服务器无响应时不再永久卡"数据加载中…"
+    const get = (u, opt) => {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 8000);
+      return fetch(u, {...opt, cache: "no-store", signal: ac.signal})
+        .finally(() => clearTimeout(timer));
+    };
     const [m, f] = await Promise.all([
-      fetch("data/market.json", {cache:"no-store"}).then(r => r.json()),
-      fetch("data/funds.json", {cache:"no-store"}).then(r => r.json()),
+      get("data/market.json").then(r => r.json()),
+      get("data/funds.json").then(r => r.json()),
     ]);
     market = m;
     fundsCfg = Array.isArray(f) ? f : (f.funds || []);
