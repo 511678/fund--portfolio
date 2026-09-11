@@ -174,3 +174,59 @@ test("回归：新录基金无 market 数据时总览不崩（用户报障：总
   const heroPnl = doc.getElementById("heroPnl").textContent;
   assert.ok(heroPnl.includes("+200.00"), `持有盈亏应显示 +200：${heroPnl}`);
 });
+
+/* ---------- 板块手选（东财板块列表） ---------- */
+test("板块手选：覆盖自动归类（手选 ＞ 行业数据 ＞ 兜底）", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  // 020691 有真实行业数据（信息技术）；手选"白酒"后整个基金应归消费
+  window.eval(`amounts = {"020691": {amt: 3000, cost: 2800, name: "通信设备指数A",
+    sector: "白酒", d: latestNavDate("020691")}};`);
+  window.renderDash();
+  const legend = doc.getElementById("legendTable").textContent;
+  assert.ok(legend.includes("消费"), `手选白酒应归消费板块：${legend}`);
+  assert.ok(!legend.includes("信息技术"), "手选后不应再按行业归信息技术");
+  // 明细行板块列显示手选值 + 手选标记
+  window.navTo("txn");
+  window.renderTxnView();
+  const rows = doc.getElementById("holdRows").textContent;
+  assert.ok(rows.includes("白酒 · 手选"), `明细板块应显示手选：${rows}`);
+  // 我的基金表板块按钮显示手选板块
+  const table = doc.getElementById("myFundsTable").textContent;
+  assert.ok(table.includes("白酒 ✎"), `我的基金表应显示手选：${table}`);
+});
+
+test("板块手选：清除手选恢复自动归类", async () => {
+  const { window } = await loadPage();
+  window.eval(`amounts = {"020691": {amt: 3000, cost: 2800, name: "通信设备指数A",
+    sector: "白酒", d: latestNavDate("020691")}};`);
+  window.eval(`openSectorPicker({code: "020691"});`);
+  window.eval(`document.getElementById("secClear").click()`);
+  assert.equal(window.eval(`amounts["020691"].sector`), undefined, "清除后 sector 应删除");
+  window.renderDash();
+  const legend = window.document.getElementById("legendTable").textContent;
+  assert.ok(legend.includes("信息技术"), "恢复后按真实行业归信息技术");
+});
+
+test("板块选择器：搜索过滤与点选落库", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.eval(`amounts = {"020691": {amt: 3000, cost: 2800, name: "通信设备指数A", d: latestNavDate("020691")}};`);
+  // 用注入的假板块列表（不依赖网络）
+  window.eval(`sectorCache = {at: Date.now(), list: [
+    {name: "半导体", code: "BK1036", pct: 2.5},
+    {name: "白酒", code: "BK0477", pct: -1.2},
+    {name: "通信设备", code: "BK1015", pct: 0.8}]};`);
+  window.eval(`openSectorPicker({code: "020691"})`);
+  assert.ok(doc.getElementById("secModalBg").classList.contains("on"), "模态应打开");
+  // 搜索过滤
+  const inp = doc.getElementById("secSearch");
+  inp.value = "白酒";
+  window.eval(`renderSectorList("白酒")`);
+  const items = doc.querySelectorAll(".sec-item");
+  assert.equal(items.length, 1, "搜索'白酒'应只剩 1 项");
+  // 点选
+  window.eval(`document.querySelector(".sec-item").click()`);
+  assert.equal(window.eval(`amounts["020691"].sector`), "白酒", "点选后 sector 落库");
+  assert.ok(!doc.getElementById("secModalBg").classList.contains("on"), "选后模态关闭");
+});

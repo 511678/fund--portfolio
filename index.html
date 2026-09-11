@@ -335,6 +335,9 @@
         <div class="field"><label>累计投入成本（元，可选）</label>
           <input id="nCost" inputmode="decimal" placeholder="留空 = 按市值开账，盈亏从今天起算">
           <div class="hint">已有持仓快照：金额填最新市值，成本填总共投入的钱（含买入手续费）</div></div>
+        <div class="field"><label>板块（可选，手选后覆盖自动归类）</label>
+          <button class="btn" id="nSectorBtn" style="width:100%;justify-content:space-between">
+            <span id="nSectorLabel">自动归类（点此从股市 1000 个板块中选择）</span><span>▾</span></button></div>
         <button class="btn primary" id="btnAddFund">保存基金</button>
         <div class="ok-msg" id="addMsg"></div>
       </div>
@@ -461,13 +464,29 @@
   </div>
 </div>
 
+<!-- 板块选择模态 -->
+<div class="modal-bg" id="secModalBg">
+  <div class="modal">
+    <h3 id="secModalTitle">选择板块</h3>
+    <div class="field" style="margin-bottom:8px">
+      <input id="secSearch" placeholder="搜索板块名，如：半导体 / 白酒 / 军工 / 黄金" autocomplete="off">
+    </div>
+    <div class="hint">数据：东方财富行业+概念板块<span id="secSrcHint"></span>。选中后该基金整体归入此板块（优先于自动归类）。</div>
+    <div id="secList" style="max-height:52vh;overflow:auto;margin-top:8px"></div>
+    <div class="actions">
+      <button class="btn" id="secClear">清除手选</button>
+      <button class="btn" id="secClose">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
-<script src="js/core.js?v=3"></script>
+<script src="js/core.js?v=4"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v3";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v4";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -489,8 +508,11 @@ function fundBucketFallback(code) {
   if (/QDII|国际|亚洲|全球|新兴|美国|纳斯达克|标普|日经/.test(t)) return "海外QDII";
   return fundsCfg.find(f => f.code === code)?.fallback || "综合";
 }
-/* 某基金的主板块（占比最高的行业所归板块）+ 第一大细分行业 */
+/* 某基金的主板块（占比最高的行业所归板块）+ 第一大细分行业。
+   手选板块（amounts.sector）优先级最高，整个基金归入其大板块。 */
 function fundMainBucket(code) {
+  const ov = amounts[code]?.sector;
+  if (ov) return {bucket: bucketOf(ov), sub: ov + " · 手选"};
   return FP.fundMainBucket(market?.funds?.[code]?.industries, fundBucketFallback(code));
 }
 const LS = { amt:"fp_amounts", txn:"fp_txns", set:"fp_settings", cache:"fp_market_cache" };
@@ -624,9 +646,15 @@ function compute() {
   for (const c of codes) {
     const amt = amounts[c].amt, info = market?.funds?.[c] || {};
     out.total += amt;
-    // 板块：有行业数据按行业分摊；否则整体进兜底大类
+    // 板块：手选 > 按行业分摊 > 兜底大类
+    const ov = amounts[c].sector;
     const inds = Object.entries(info.industries || {});
-    if (inds.length) {
+    if (ov) {
+      const b = bucketOf(ov);
+      out.sectors[b] ??= {value:0, funds:new Set()};
+      out.sectors[b].value += amt;
+      out.sectors[b].funds.add(c);
+    } else if (inds.length) {
       for (const [ind, w] of inds) {
         const b = bucketOf(ind);
         out.sectors[b] ??= {value:0, funds:new Set()};
@@ -875,12 +903,15 @@ function renderHoldings() {
 function renderTxnView() {
   renderHoldings();
   const codes = Object.keys(amounts);
-  $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>兜底板块</th><th>金额</th><th>成本</th><th>已落袋</th><th></th></tr>" +
+  $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>板块</th><th>金额</th><th>成本</th><th>已落袋</th><th></th></tr>" +
     (codes.length ? codes.map(c => {
       const cost = amounts[c].cost;
       const realized = amounts[c].realized;
+      const sec = amounts[c].sector;
       return `<tr><td>${esc(amounts[c].name || market?.funds?.[c]?.name || c)}</td><td>${esc(c)}</td>
-        <td>${esc(fundBucketFallback(c))}</td><td class="num">${fmtY(amounts[c].amt)}</td>
+        <td><button class="btn b-mini pick-sector" data-code="${esc(c)}"
+          title="点击从股市板块中选择归类">${esc(sec || fundMainBucket(c).bucket)}${sec ? " ✎" : ""}</button></td>
+        <td class="num">${fmtY(amounts[c].amt)}</td>
         <td class="num">${cost == null ? `<span style="color:var(--ink-3)">未录</span>` : fmtY(cost)}</td>
         <td class="num ${realized ? cls(realized) : ""}">${realized
           ? `<button class="btn b-mini set-realized" data-code="${esc(c)}" title="点击修正已实现盈亏">${f2m(realized)}</button>`
@@ -981,15 +1012,19 @@ $("btnAddFund").onclick = async () => {
   });
   // 成本：显式填了用之；留空则保留原成本，原本也没有就按市值开账（盈亏从今天起算）
   const prev = amounts[code];
-  amounts[code] = {amt, name,
+  const rec = {amt, name,
     cost: costFilled ? FP.round2(costIn) : (prev?.cost ?? FP.openBook(amt)),
     d: latestNavDate(code) || todayLocal()};
+  if (prev?.sector) rec.sector = prev.sector;   // 保留已有手选
+  if (nSectorPick) rec.sector = nSectorPick;    // 本次录入手选的板块
+  amounts[code] = rec;
   lsSet(LS.amt, amounts);
   $("btnAddFund").disabled = false;
   $("addMsg").textContent = ok ? "✓ 已保存" : "⚠️ 金额已存本机；清单写入 GitHub 失败（去设置里检查 Token），下次连网重试即可";
   $("nCode").value = $("nName").value = $("nAmt").value = $("nCost").value = "";
   $("nLookup").textContent = "输入完整代码后自动查询名称";
   if (ok) fundsCfg.push({code, fallback:fb});
+  nSectorPick = ""; updateSectorBtn();
   renderDash();   // 无论清单是否写入成功，金额都已落库，总览必须刷新
 };
 
@@ -1263,6 +1298,100 @@ $("modalOk").onclick = async () => {
   renderDash(); toast("已入库");
 };
 
+/* ================= 板块选择器（东财行业+概念板块） ================= */
+let sectorCache = null;        // [{name, code, type, pct?}]
+let sectorTarget = null;       // {code} 已有基金 | {form} 录入表单
+let nSectorPick = "";          // 录入表单临时选中板块
+
+async function loadSectors() {
+  if (sectorCache && Date.now() - sectorCache.at < 15 * 60 * 1000) return sectorCache.list;
+  // 1) 实时接口（CORS 全开，含当日涨跌幅）
+  try {
+    const r = await fetch("https://push2.eastmoney.com/api/qt/clist/get"
+      + "?pn=1&pz=1000&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50,m:90+t:3+f:!50"
+      + "&fields=f12,f14,f3", {cache: "no-store"});
+    const j = await r.json();
+    const diff = j?.data?.diff || [];
+    if (diff.length) {
+      sectorCache = {at: Date.now(), list: diff.map(d => ({
+        name: d.f14, code: d.f12, pct: typeof d.f3 === "number" ? d.f3 : null}))};
+      return sectorCache.list;
+    }
+  } catch {}
+  // 2) 离线兜底：Action 每日快照
+  try {
+    const j = await fetch("data/sectors.json", {cache: "no-store"}).then(r => r.json());
+    sectorCache = {at: Date.now(),
+      list: (j.sectors || []).map(s => ({name: s.name, code: s.code, pct: null}))};
+    $("secSrcHint").textContent = "（离线快照 " + (j.updated_at || "").slice(0, 10) + "）";
+    return sectorCache.list;
+  } catch {}
+  return [];
+}
+function openSectorPicker(target) {
+  sectorTarget = target;
+  $("secModalTitle").textContent = target.code
+    ? `选择板块 · ${amounts[target.code]?.name || target.code}`
+    : "选择板块（新基金）";
+  $("secSearch").value = "";
+  $("secModalBg").classList.add("on");
+  renderSectorList("");
+  loadSectors().then(list => {
+    if (list.length) { $("secSrcHint").textContent = `（共 ${list.length} 个）`; renderSectorList($("secSearch").value); }
+    else $("secList").innerHTML = `<div class="hempty">板块列表加载失败，请检查网络后重试</div>`;
+  });
+}
+function renderSectorList(filter) {
+  const list = sectorCache?.list || [];
+  const kw = (filter || "").trim().toLowerCase();
+  const rows = list
+    .filter(s => !kw || s.name.toLowerCase().includes(kw))
+    .slice(0, 120)
+    .map(s => {
+      const pct = s.pct;
+      const pctHtml = pct == null ? "" :
+        `<span class="num ${cls(pct)}">${sign(pct)}</span>`;
+      const typeTag = `<span style="font-size:11px;color:var(--ink-3);margin-left:6px">${s.name.length <= 4 ? "行业" : ""}</span>`;
+      return `<button class="btn sec-item" data-name="${esc(s.name)}"
+        style="width:100%;justify-content:space-between;margin-bottom:6px">
+        <span>${esc(s.name)}</span><span>${pctHtml}</span></button>`;
+    }).join("");
+  $("secList").innerHTML = rows ||
+    (list.length ? `<div class="hempty">没有匹配「${esc(filter)}」的板块</div>`
+      : `<div class="hempty">板块列表加载中…</div>`);
+}
+$("secSearch").addEventListener("input", e => renderSectorList(e.target.value));
+$("secClose").onclick = () => $("secModalBg").classList.remove("on");
+$("secClear").onclick = () => {
+  if (sectorTarget?.code) {
+    delete amounts[sectorTarget.code].sector; lsSet(LS.amt, amounts);
+    renderTxnView(); renderDash(); toast("已恢复自动归类");
+  } else { nSectorPick = ""; updateSectorBtn(); }
+  $("secModalBg").classList.remove("on");
+};
+$("nSectorBtn").onclick = () => openSectorPicker({form: true});
+function updateSectorBtn() {
+  $("nSectorLabel").textContent = nSectorPick
+    ? `✓ ${nSectorPick}（点此更换）` : "自动归类（点此从股市 1000 个板块中选择）";
+}
+document.addEventListener("click", e => {
+  const item = e.target.closest(".sec-item");
+  if (!item) return;
+  const name = item.dataset.name;
+  if (sectorTarget?.code) {
+    amounts[sectorTarget.code].sector = name; lsSet(LS.amt, amounts);
+    renderTxnView(); renderDash(); toast(`已归入「${name}」`);
+  } else {
+    nSectorPick = name; updateSectorBtn();
+  }
+  $("secModalBg").classList.remove("on");
+});
+/* 「我的基金」表里的板块按钮（事件委托） */
+document.addEventListener("click", e => {
+  const b = e.target.closest(".pick-sector");
+  if (b) openSectorPicker({code: b.dataset.code});
+});
+
 /* ================= 设置 ================= */
 $("btnSaveSet").onclick = () => {
   settings = {repo: $("sRepo").value.trim(), pat: $("sPat").value.trim(),
@@ -1367,6 +1496,14 @@ $("themeBtn").onclick = () => {
   $("ftVer").textContent = APP_VER;
   loadData();
   fetchLive();
+  // hash 路由：刷新/分享链接保持当前视图（#txn/#entry/#set）
+  const applyHash = () => {
+    const h = location.hash.slice(1);
+    if (["dash", "entry", "txn", "set"].includes(h))
+      document.querySelector(".view.on")?.id !== "view-" + h && navTo(h);
+  };
+  window.addEventListener("hashchange", applyHash);
+  applyHash();
 })();
 </script>
 </body>

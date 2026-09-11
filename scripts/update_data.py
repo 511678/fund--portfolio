@@ -24,6 +24,7 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FUNDS_FILE = ROOT / "data" / "funds.json"
 MARKET_FILE = ROOT / "data" / "market.json"
+SECTORS_FILE = ROOT / "data" / "sectors.json"
 
 UA = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
       "Referer": "http://fundf10.eastmoney.com/"}
@@ -127,6 +128,34 @@ def fetch_nav_history(code: str) -> list:
     return list(reversed(out[-NAV_DAYS:]))   # 时间升序，方便直接画线
 
 
+def fetch_sectors() -> list:
+    """东财行业+概念板块全量列表（名称/代码），供前端板块选择器离线兜底。
+    盘中前端会直接拉 push2 实时接口，这里只做 Action 每日快照。"""
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+               "Referer": "https://quote.eastmoney.com/"}
+    out = []
+    for board_type in ("2", "3"):   # 2=行业板块 3=概念板块
+        page = 1
+        while True:
+            req = urllib.request.Request(
+                "https://push2delay.eastmoney.com/api/qt/clist/get"
+                f"?pn={page}&pz=100&po=1&np=1&fltt=2&invt=2&fid=f12"
+                f"&fs=m:90+t:{board_type}+f:!50&fields=f12,f14", headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as r:
+                d = json.loads(r.read().decode("utf-8"))
+            diff = ((d.get("data") or {}).get("diff")) or []
+            for r_ in diff:
+                out.append({"code": r_.get("f12"), "name": r_.get("f14"),
+                            "type": "行业" if board_type == "2" else "概念"})
+            total = ((d.get("data") or {}).get("total")) or 0
+            if page * 100 >= total or not diff:
+                break
+            page += 1
+            time.sleep(0.2)
+    return out
+
+
 def main() -> int:
     funds = json.loads(FUNDS_FILE.read_text("utf-8")) if FUNDS_FILE.exists() else []
     if isinstance(funds, dict):
@@ -161,6 +190,15 @@ def main() -> int:
 
     MARKET_FILE.write_text(json.dumps(market, ensure_ascii=False, indent=1),
                            "utf-8")
+    try:
+        sectors = fetch_sectors()
+        SECTORS_FILE.write_text(
+            json.dumps({"updated_at": market["updated_at"], "sectors": sectors},
+                       ensure_ascii=False, indent=1),
+            "utf-8")
+        print(f"sectors: {len(sectors)}")
+    except Exception as e:
+        print(f"ERR sectors: {e}", file=sys.stderr)
     print(f"done: {len(market['funds'])} funds, {len(errors)} errors")
     return 0
 
