@@ -323,13 +323,15 @@
         </div>
         <div class="field"><label>基金名称（自动带出，可改）</label>
           <input id="nName" placeholder="查询后自动填入"></div>
-        <div class="field"><label>兜底板块（无A股重仓数据时归入，如黄金/QDII）</label>
+        <div class="field"><label>板块（输入代码后自动识别，一般无需手选）</label>
           <select id="nFallback">
-            <option>综合</option><option>信息技术</option><option>先进制造</option>
+            <option value="">🔍 自动识别（推荐）</option>
+            <option>信息技术</option><option>先进制造</option>
             <option>消费</option><option>医药</option><option>金融</option>
             <option>周期资源</option><option>基建地产</option>
-            <option>黄金</option><option>海外QDII</option>
-          </select></div>
+            <option>黄金</option><option>海外QDII</option><option>综合</option>
+          </select>
+          <div class="hint" id="nFallbackHint">10 大板块：信息技术（半导体/芯片/AI/软件）｜ 先进制造（光伏/锂电/军工/汽车）｜ 消费（白酒/食品/家电）｜ 医药 ｜ 金融（银行/证券/保险）｜ 周期资源（煤炭/有色/化工）｜ 基建地产 ｜ 黄金 ｜ 海外QDII（纳指/全球/港股）｜ 综合（货币/债券）。自动识别依据：基金名称 → 前十大重仓股行业穿透。想用更细的板块（1000 个）可在「我的基金」表手选。</div></div>
         <div class="field"><label>持仓市值 / 投入金额（元，只存本机，不上传）</label>
           <input id="nAmt" inputmode="decimal" placeholder="如 5000"></div>
         <div class="field"><label>累计投入成本（元，可选）</label>
@@ -482,11 +484,11 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js?v=4"></script>
+<script src="js/core.js?v=5"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v4";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v5";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -979,19 +981,81 @@ $("nCode").addEventListener("input", e => {
     lookupTimer = setTimeout(() => lookupFund(v), 300);
   } else $("nLookup").textContent = "输入完整代码后自动查询名称";
 });
+/* ---- 板块自动识别 ----
+   ① 名称关键词快判（毫秒级）；② 识别不出时穿透前十大重仓股行业投票。
+   结果写入 lastDetect，保存时用作 fallback；lookupToken 防止旧查询覆盖新查询。 */
+let lastDetect = {sector: "", source: ""};
+let lookupToken = 0;
+const NAME_SECTOR_RULES = [
+  [/货币|理财|现金宝/, "综合"],
+  [/纯债|信用债|利率债|债券|双债/, "综合"],
+  [/黄金|贵金属/, "黄金"],
+  [/qdii|纳斯达克|纳指|标普|道琼斯|美国|美债|日经|德国|法国|印度|越南|沙特|新兴市场|亚洲|亚太|全球|海外|香港|港股|恒生|港股通|沪港深/, "海外QDII"],
+  [/半导体|芯片|集成电路|晶圆|封测|信息产业|信息技术|计算机|软件|互联网|云计算|大数据|人工智能|ai|算力|5g|通信|传媒|游戏|文化|媒体|电子|元件|光电|消费电子|面板|pcs?b/i, "信息技术"],
+  [/新能源|能源革新|清洁能源|光伏|风电|电池|锂电|储能|电力设备|碳中和|军工|国防|航天|航空装备|大飞机|机器人|智能制造|工业(4|四)|高端装备|汽车产业|智能汽车|新能源车|装备制造/, "先进制造"],
+  [/白酒|酿酒|啤酒|食品|饮料|乳业|乳品|消费|内需|家电|家居|零售|商贸|旅游|酒店|农业|种业|养殖|畜牧|宠物/, "消费"],
+  [/医药|医疗|健康|生物|中药|疫苗|创新药|cxo/i, "医药"],
+  [/银行|证券|保险|金融|非银|券商/, "金融"],
+  [/钢铁|化工|化学|有色|煤炭|石油|石化|油气|资源|材料|周期|建材|水泥|玻璃|环保/, "周期资源"],
+  [/基建|地产|房地产|建筑|交通运输|物流|港口|公用事业|电力/, "基建地产"],
+];
+function sectorFromName(name, ftype) {
+  const s = (name || "") + " " + (ftype || "");
+  for (const [re, b] of NAME_SECTOR_RULES) if (re.test(s)) return b;
+  return "";
+}
+async function detectSectorByHoldings(code, token) {
+  // 前十大重仓股 → 逐股查细分行业 → bucketOf 加权投票
+  const d = await fetch(`https://fundmobapi.eastmoney.com/FundMNewApi/FundMNInverstPosition?FCODE=${code}&deviceid=1&plat=Iphone&product=EFund&version=6.2.5`).then(r => r.json());
+  if (token !== lookupToken) return;   // 用户已改代码，本次结果作废
+  const stocks = d?.Datas?.fundStocks || [];
+  if (!stocks.length) return;
+  const agg = {};
+  let total = 0;
+  for (const s of stocks) {
+    const w = +s.JZBL || 0;
+    if (w <= 0) continue;
+    const secid = ({"1": "1", "2": "0"}[s.TEXCH] ?? s.TEXCH) + "." + s.GPDM;
+    try {
+      const sd = await fetch(`https://push2delay.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f127`).then(r => r.json());
+      if (token !== lookupToken) return;
+      const ind = sd?.data?.f127;
+      if (ind) {
+        const b = bucketOf(ind);
+        agg[b] = (agg[b] || 0) + w;
+        total += w;
+      }
+    } catch {}
+  }
+  if (!total) return;
+  const ranked = Object.entries(agg).sort((a, b) => b[1] - a[1]);
+  const [best, bestW] = ranked[0];
+  lastDetect = {sector: best, source: `重仓穿透（${ranked.slice(0, 3).map(([b, w]) => `${b}${(w/total*100).toFixed(0)}%`).join("、")}）`};
+  if ($("nFallback").value === "") $("nFallback").value = best;
+  $("nLookup").textContent = `✓ 已自动识别板块：${best} — 依据${lastDetect.source}`;
+}
 async function lookupFund(code) {
+  lastDetect = {sector: "", source: ""};
+  $("nFallback").value = "";
+  const token = ++lookupToken;
   try {
     const r = await fetch(`https://fundmobapi.eastmoney.com/FundMNewApi/FundMNDetailInformation?FCODE=${code}&deviceid=1&plat=Iphone&product=EFund&version=6.2.5`);
     const d = await r.json();
+    if (token !== lookupToken) return;
     const name = d?.Datas?.SHORTNAME, ftype = d?.Datas?.FTYPE;
     if (name) {
       $("nName").value = name;
-      $("nLookup").textContent = `✓ ${name}（${ftype || "未知类型"}）`;
-      // 按类型猜兜底大类
-      const guess = /货币|理财/.test(ftype||"") ? "综合"
-        : /黄金|商品/.test(ftype||"") ? "黄金"
-        : /QDII|国际|亚洲|全球|新兴|美国|纳斯达克|标普|日经/.test(ftype||"") ? "海外QDII" : null;
-      if (guess) $("nFallback").value = guess;
+      // ① 名称快判
+      const guess = sectorFromName(name, ftype);
+      if (guess) {
+        lastDetect = {sector: guess, source: "基金名称关键词"};
+        $("nFallback").value = guess;
+        $("nLookup").textContent = `✓ ${name}（${ftype || "未知类型"}）｜ 自动识别板块：${guess}（按名称）`;
+        return;
+      }
+      $("nLookup").textContent = `✓ ${name}（${ftype || "未知类型"}）｜ 正在穿透重仓股识别板块…`;
+      // ② 重仓穿透深查
+      await detectSectorByHoldings(code, token);
     } else { $("nLookup").textContent = "未查到该代码，请确认"; }
   } catch { $("nLookup").textContent = "查询失败（网络），可手动填写名称"; }
 }
@@ -1004,7 +1068,7 @@ $("btnAddFund").onclick = async () => {
   if (!name) return toast("请填写基金名称");
   if (!(amt > 0)) return toast("请填写金额");
   if (costFilled && !(costIn > 0)) return toast("成本需为大于 0 的金额，或留空开账");
-  const fb = $("nFallback").value;
+  const fb = $("nFallback").value || lastDetect.sector || "综合";   // 自动识别结果或兜底
   $("btnAddFund").disabled = true; $("addMsg").textContent = "保存中…";
   const ok = await ghWriteFunds(cfg => {
     if (!cfg.find(f => f.code === code)) cfg.push({code, fallback:fb, added:todayLocal()});
@@ -1020,7 +1084,8 @@ $("btnAddFund").onclick = async () => {
   amounts[code] = rec;
   lsSet(LS.amt, amounts);
   $("btnAddFund").disabled = false;
-  $("addMsg").textContent = ok ? "✓ 已保存" : "⚠️ 金额已存本机；清单写入 GitHub 失败（去设置里检查 Token），下次连网重试即可";
+  $("addMsg").textContent = ok ? `✓ 已保存（板块：${fb}${lastDetect.source ? " · " + lastDetect.source : ""}）`
+    : `⚠️ 金额已存本机（板块暂记 ${fb}${lastDetect.sector ? "" : "，未能自动识别，数据到位后会自动纠正"}）；清单写入 GitHub 失败（去设置里检查 Token）`;
   $("nCode").value = $("nName").value = $("nAmt").value = $("nCost").value = "";
   $("nLookup").textContent = "输入完整代码后自动查询名称";
   if (ok) fundsCfg.push({code, fallback:fb});

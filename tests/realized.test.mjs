@@ -230,3 +230,101 @@ test("板块选择器：搜索过滤与点选落库", async () => {
   assert.equal(window.eval(`amounts["020691"].sector`), "白酒", "点选后 sector 落库");
   assert.ok(!doc.getElementById("secModalBg").classList.contains("on"), "选后模态关闭");
 });
+
+/* ---------- 板块自动识别（录入页） ---------- */
+test("自动识别①：基金名称关键词快判", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  const cases = {
+    "财通集成电路产业股票C": "信息技术",
+    "招商中证白酒指数(LOF)C": "消费",
+    "国富亚洲机会股票(QDII)C": "海外QDII",
+    "广发全球精选股票(QDII)人民币C": "海外QDII",
+    "前海开源黄金ETF联接C": "黄金",
+    "华夏能源革新股票C": "先进制造",
+    "易方达蓝筹精选混合": "",            // 无关键词 → 走深查
+    "天弘余额宝货币": "综合",
+    "招商中证煤炭等权指数(LOF)C": "周期资源",
+    "华夏医药ETF联接C": "医药",
+    "华宝中证银行ETF联接C": "金融",
+  };
+  for (const [name, want] of Object.entries(cases))
+    assert.equal(window.eval(`sectorFromName(${JSON.stringify(name)}, "")`), want, name);
+});
+
+test("自动识别②：录入代码触发识别并填入下拉（名称快判路径）", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.fetch = async url => {
+    const u = String(url);
+    if (u.includes("FundMNDetailInformation"))
+      return {ok: true, json: async () => ({Datas: {SHORTNAME: "财通集成电路产业股票C", FTYPE: "股票型"}})};
+    throw new TypeError("unexpected: " + u);
+  };
+  await window.eval(`lookupFund("006503")`);
+  assert.equal(doc.getElementById("nFallback").value, "信息技术", "名称识别应填入下拉");
+  assert.ok(doc.getElementById("nLookup").textContent.includes("自动识别板块：信息技术"));
+});
+
+test("自动识别③：名称无把握时穿透重仓股投票", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.fetch = async url => {
+    const u = String(url);
+    if (u.includes("FundMNDetailInformation"))
+      return {ok: true, json: async () => ({Datas: {SHORTNAME: "易方达蓝筹精选混合", FTYPE: "混合型"}})};
+    if (u.includes("FundMNInverstPosition"))
+      return {ok: true, json: async () => ({Datas: {fundStocks: [
+        {GPDM: "600519", TEXCH: "1", JZBL: "9.5"},   // 贵州茅台 → 白酒Ⅱ → 消费
+        {GPDM: "000858", TEXCH: "2", JZBL: "8.8"},   // 五粮液 → 消费
+        {GPDM: "601318", TEXCH: "1", JZBL: "7.0"},   // 中国平安 → 保险 → 金融
+      ]}})};
+    if (u.includes("push2delay"))
+      return {ok: true, json: async () => {
+        // 按调用顺序无法区分个股，统一返回白酒行业（前两只权重远大于第三只 → 消费胜出）
+        return {data: {f127: "白酒Ⅱ"}};
+      }};
+    throw new TypeError("unexpected: " + u);
+  };
+  await window.eval(`lookupFund("005827")`);
+  assert.equal(doc.getElementById("nFallback").value, "消费", "重仓投票应得出消费");
+  const hint = doc.getElementById("nLookup").textContent;
+  assert.ok(hint.includes("重仓穿透"), `应显示识别依据：${hint}`);
+});
+
+test("自动识别④：快速连续输入代码，旧查询结果不覆盖新查询", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  let resolveA;
+  window.fetch = async url => {
+    const u = String(url);
+    if (u.includes("FundMNDetailInformation") && u.includes("006503")) {
+      await new Promise(r => { resolveA = r; });   // 第一只的响应挂起
+      return {ok: true, json: async () => ({Datas: {SHORTNAME: "财通集成电路产业股票C", FTYPE: "股票型"}})};
+    }
+    if (u.includes("FundMNDetailInformation"))
+      return {ok: true, json: async () => ({Datas: {SHORTNAME: "招商中证白酒指数(LOF)C", FTYPE: "指数型"}})};
+    throw new TypeError("unexpected");
+  };
+  const p1 = window.eval(`lookupFund("006503")`);   // 慢查询先发出
+  await window.eval(`lookupFund("161725")`);        // 快查询后发、先回
+  assert.equal(doc.getElementById("nFallback").value, "消费");
+  resolveA();                                        // 慢查询此刻才返回
+  await p1;
+  assert.equal(doc.getElementById("nFallback").value, "消费", "旧查询作废，不得覆盖白酒");
+  assert.ok(!doc.getElementById("nFallback").value.includes("信息技术"), "陈旧结果不得回填");
+});
+
+test("自动识别⑤：保存时兜底链 fallback值=下拉＞识别结果＞综合", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  // 模拟 lastDetect 已有识别结果、下拉为空
+  window.eval(`lastDetect = {sector: "信息技术", source: "重仓穿透"};
+    amounts = {}; nSectorPick = "";
+    $("nCode").value = "006503"; $("nName").value = "财通集成电路C";
+    $("nAmt").value = "100"; $("nCost").value = ""; $("nFallback").value = "";`);
+  await window.eval(`document.getElementById("btnAddFund").click()`);
+  await new Promise(r => setTimeout(r, 50));
+  // funds.json 写入会失败（无 PAT），但识别结果应体现在 addMsg
+  assert.ok(doc.getElementById("addMsg").textContent.includes("信息技术"), "识别板块应显示");
+});
