@@ -438,7 +438,7 @@
     <div class="ok-msg" id="setMsg"></div>
   </section>
 
-  <footer>数据：天天基金公开披露 ｜ 金额只存本机 ｜ <span id="ftRepo"></span></footer>
+  <footer>数据：天天基金公开披露 ｜ 金额只存本机 ｜ <span id="ftRepo"></span> ｜ <span id="ftVer"></span></footer>
 </div>
 
 <!-- 手机底部导航 -->
@@ -463,10 +463,20 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js"></script>
+<script src="js/core.js?v=3"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
+const APP_VER = "v3";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+/* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
+window.addEventListener("error", e => {
+  const b = document.getElementById("updBadge");
+  if (b) { b.textContent = "⚠️ " + (e.message || "脚本错误"); b.style.color = "var(--up)"; }
+});
+window.addEventListener("unhandledrejection", e => {
+  const b = document.getElementById("updBadge");
+  if (b) { b.textContent = "⚠️ " + (e.reason?.message || String(e.reason || "异步错误")); b.style.color = "var(--up)"; }
+});
 const { bucketOf, esc, todayLocal, isFreshNav } = FP;
 const BUCKETS = ["信息技术","先进制造","消费","医药","金融","周期资源","基建地产","综合","黄金","海外QDII"];
 const BUCKET_COLOR = {"信息技术":"--s1","先进制造":"--s2","消费":"--s3","医药":"--s5",
@@ -664,7 +674,7 @@ function compute() {
       const wsum = [...s.funds].reduce((a,c) => a + amounts[c].amt, 0);
       const sr = dates.map(d => { let v=0, w=0;
         for (const c of s.funds) {
-          const p = (market.funds[c].nav_history||[]).find(x => x.d === d);
+          const p = ((market.funds[c] || {}).nav_history || []).find(x => x.d === d);
           if (p?.pct != null) { v += amounts[c].amt * p.pct; w += amounts[c].amt; } }
         return w > 0 ? v/w : null; });
       const valid = sr.filter(x => x != null);
@@ -1354,6 +1364,7 @@ $("themeBtn").onclick = () => {
   $("sZkey").value = settings.zkey || "";
   $("sZmodel").value = settings.zmodel || "glm-4.6v-flash";
   $("ftRepo").textContent = $("sRepo").value;
+  $("ftVer").textContent = APP_VER;
   loadData();
   fetchLive();
 })();

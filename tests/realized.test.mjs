@@ -158,3 +158,19 @@ test("端到端：识别弹窗卖出分支同样累计落袋", async () => {
   const rec = window.eval(`amounts["020691"]`);
   assert.equal(rec.realized, 250, "识别卖出半仓 → 落袋 +250");
 });
+
+test("回归：新录基金无 market 数据时总览不崩（用户报障：总览空白卡死）", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  // 020691 在 market.json；999888 是新录的、Action 还没抓到数据 → 触发 compute 裸访问崩溃
+  window.eval(`amounts = {
+    "020691": {amt: 3000, cost: 2800, name: "通信设备指数A", d: latestNavDate("020691")},
+    "999888": {amt: 500, cost: 500, name: "新基金还没有数据", d: "2026-09-07"}
+  };`);
+  window.renderDash();   // 修复前这里抛 nav_history undefined
+  assert.ok(!doc.getElementById("updBadge").textContent.includes("⚠️"),
+    "不得有未捕获错误: " + doc.getElementById("updBadge").textContent);
+  assert.equal(doc.getElementById("heroAmt").textContent, "¥3,500.00", "总市值含无数据基金");
+  const heroPnl = doc.getElementById("heroPnl").textContent;
+  assert.ok(heroPnl.includes("+200.00"), `持有盈亏应显示 +200：${heroPnl}`);
+});
