@@ -440,3 +440,21 @@ test("导入拆分：无成本盈利基金收益整体进已落袋（用户 0212
   assert.equal(rec.hasCost, false, "盈利基金无需填成本");
   // Hero 总账口径：未录成本不计持有 → 累计盈亏 = 0(持有) + 601.38 = App 数字 ✅
 });
+
+/* ---------- 一键同步链接（?data=base64） ---------- */
+test("URL 一键导入：base64 数据经确认后写入 amounts", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  const data = {amounts: {"020640": {amt: 109.23, cost: 149.44, name: "广发半导体设备ETF联接C", realized: -40.21, d: "2026-09-11"}}};
+  const b64 = window.eval(`btoa(unescape(encodeURIComponent(${JSON.stringify(JSON.stringify(data))})))`);
+  window.confirm = () => true;
+  window.eval(`(function () {
+    const j = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(${JSON.stringify(b64)}), c => c.charCodeAt(0))));
+    const clean = sanitizeImport(j).amounts;
+    amounts = clean;   // 与 applyImport 的写入路径一致（applyImport 另含 toast/渲染）
+  })()`);
+  const rec = window.eval(`amounts["020640"]`);
+  assert.equal(rec.amt, 109.23);
+  assert.equal(rec.cost, 149.44);
+  assert.equal(rec.realized, 0, "累计收益-40.21 == 持有收益 → 已落袋补差 0，不重复计入");
+});

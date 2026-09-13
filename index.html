@@ -493,11 +493,11 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js?v=7"></script>
+<script src="js/core.js?v=8"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v7";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v8";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -1567,45 +1567,54 @@ $("btnExport").onclick = () => {
   a.click();
 };
 $("btnImport").onclick = () => $("fileImport").click();
+/* 导入内容不可信：代码强制 6 位数字、金额/名称/动作清洗后再入库。
+   realized 语义 = App 显示的累计收益（含未赎回浮盈），入库时拆分：
+     有成本 → 持有收益(amt-cost) 已表达一部分，差额补进已落袋
+     无成本 → 收益整体放已落袋（持有收益显示"未录成本"） */
+function sanitizeImport(j) {
+  if (j.amounts && typeof j.amounts === "object") {
+    const clean = {};
+    for (const [c, v] of Object.entries(j.amounts)) {
+      const k = String(c).replace(/\D/g, "").slice(0, 6);
+      const amt = +v?.amt;
+      if (!/^\d{6}$/.test(k) || !(amt >= 0)) continue;
+      const rec = {amt, name: String(v?.name ?? "").slice(0, 60)};
+      const cost = +v?.cost;
+      if (cost > 0) rec.cost = FP.round2(cost);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(v?.d || ""))) rec.d = v.d;
+      const totalPnl = +v?.realized;
+      if (v?.realized != null && v.realized !== "" && isFinite(totalPnl)) {
+        const held = rec.cost != null ? amt - rec.cost : null;
+        rec.realized = FP.round2(held == null ? totalPnl : totalPnl - held);
+      }
+      clean[k] = rec;
+    }
+    return {amounts: clean};
+  }
+  return {};
+}
+function applyImport(j) {
+  const {amounts: clean} = sanitizeImport(j);
+  if (clean && Object.keys(clean).length) {
+    amounts = clean; lsSet(LS.amt, amounts);
+  }
+  if (Array.isArray(j.txns)) {
+    const acts = ["买入","卖出","定投","加仓","减仓"];
+    txns = j.txns.filter(t => t && /^\d{6}$/.test(String(t.code).replace(/\D/g,"").slice(0,6)))
+      .map(t => ({d: String(t.d || "").slice(0, 10),
+        code: String(t.code).replace(/\D/g, "").slice(0, 6),
+        name: String(t.name || "").slice(0, 60),
+        action: acts.includes(t.action) ? t.action : "买入",
+        amount: +t.amount || 0}));
+    lsSet(LS.txn, txns);
+  }
+  renderDash(); toast("导入成功");
+}
 $("fileImport").onchange = e => {
   const f = e.target.files[0]; if (!f) return;
   const rd = new FileReader();
   rd.onload = () => { try {
-    const j = JSON.parse(rd.result);
-    // 导入内容不可信：代码强制 6 位数字、金额/名称/动作清洗后再入库
-    if (j.amounts && typeof j.amounts === "object") {
-      const clean = {};
-      for (const [c, v] of Object.entries(j.amounts)) {
-        const k = String(c).replace(/\D/g, "").slice(0, 6);
-        const amt = +v?.amt;
-        if (!/^\d{6}$/.test(k) || !(amt >= 0)) continue;
-        const rec = {amt, name: String(v?.name ?? "").slice(0, 60)};
-        const cost = +v?.cost;                    // 成本/快照日可选
-        if (cost > 0) rec.cost = FP.round2(cost);
-        if (/^\d{4}-\d{2}-\d{2}$/.test(String(v?.d || ""))) rec.d = v.d;
-        // realized 语义 = App 显示的累计收益（含未赎回浮盈），入库时拆分：
-        //   有成本 → 持有收益(amt-cost) 已表达一部分，差额补进已落袋
-        //   无成本 → 收益整体放已落袋（持有收益显示"未录成本"）
-        const totalPnl = +v?.realized;
-        if (v?.realized != null && v.realized !== "" && isFinite(totalPnl)) {
-          const held = rec.cost != null ? amt - rec.cost : null;
-          rec.realized = FP.round2(held == null ? totalPnl : totalPnl - held);
-        }
-        clean[k] = rec;
-      }
-      amounts = clean; lsSet(LS.amt, amounts);
-    }
-    if (Array.isArray(j.txns)) {
-      const acts = ["买入","卖出","定投","加仓","减仓"];
-      txns = j.txns.filter(t => t && /^\d{6}$/.test(String(t.code).replace(/\D/g,"").slice(0,6)))
-        .map(t => ({d: String(t.d || "").slice(0, 10),
-          code: String(t.code).replace(/\D/g, "").slice(0, 6),
-          name: String(t.name || "").slice(0, 60),
-          action: acts.includes(t.action) ? t.action : "买入",
-          amount: +t.amount || 0}));
-      lsSet(LS.txn, txns);
-    }
-    renderDash(); toast("导入成功");
+    applyImport(JSON.parse(rd.result));
   } catch { toast("文件格式不对"); } };
   rd.readAsText(f);
 };
@@ -1632,6 +1641,21 @@ $("themeBtn").onclick = () => {
   $("ftVer").textContent = APP_VER;
   loadData();
   fetchLive();
+  // 一键同步链接：?data=<base64(备份JSON)> 点开即导入（手机/电脑通用）
+  try {
+    const qs = new URLSearchParams(location.search).get("data");
+    if (qs) {
+      const j = JSON.parse(new TextDecoder().decode(
+        Uint8Array.from(atob(qs), c => c.charCodeAt(0))));
+      const clean = sanitizeImport(j).amounts || {};
+      const n = Object.keys(clean).length;
+      const sum = Object.values(clean).reduce((a, r) => a + (r.amt || 0), 0);
+      if (n && confirm(`检测到同步数据：${n} 只基金，市值合计 ¥${sum.toFixed(2)}。\n导入将覆盖本机现有数据，确定？`)) {
+        applyImport(j);
+        history.replaceState(null, "", location.pathname + "#dash");
+      }
+    }
+  } catch {}
   // hash 路由：刷新/分享链接保持当前视图（#txn/#entry/#set）
   const applyHash = () => {
     const h = location.hash.slice(1);
