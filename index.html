@@ -126,6 +126,8 @@
     gap:8px; align-items:center; }
   .hold-head { font-size:11px; color:var(--ink-3); padding:8px 0 6px;
     border-bottom:1px solid var(--grid); }
+  .sort-head { cursor:pointer; }
+  .sort-head:hover { color:var(--ink-1); }
   .hold-head span:not(:first-child) { text-align:right; }
   .hrow { padding:10px 0; border-bottom:1px solid var(--grid); }
   .hrow:last-child { border-bottom:none; }
@@ -390,10 +392,17 @@
         <div style="text-align:right"><div class="label">当日收益</div>
           <div class="val num" id="holdDay">—</div></div>
       </div>
-      <div class="hold-head">
-        <span>基金 / 持有金额</span><span>当日收益</span><span>板块</span><span>持有收益</span>
+      <div class="hold-head" id="holdHead">
+        <span class="sort-head" data-sort="amt" title="点击切换排序">基金 / 持有金额</span>
+        <span class="sort-head" data-sort="day" title="点击切换排序">当日收益</span>
+        <span>板块</span>
+        <span class="sort-head" data-sort="pnl" title="点击切换排序">持有收益</span>
       </div>
       <div id="holdRows"></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>每日收益 <span class="hdate">近 14 天 · 按当前持仓回溯</span></h3>
+      <div class="tbl-scroll"><table class="data" id="dailyTable"></table></div>
     </div>
     <div class="card" style="margin-top:14px">
       <h3>我的基金 · 金额只存本机</h3>
@@ -484,11 +493,11 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js?v=5"></script>
+<script src="js/core.js?v=6"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v5";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v6";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -861,6 +870,7 @@ function renderDash() {
 }
 
 /* ================= 明细视图 ================= */
+let holdSort = "day";   // day=当日收益 | pnl=持有收益 | amt=金额（点表头循环切换）
 function renderHoldings() {
   const rows = Object.keys(amounts).filter(c => amounts[c].amt > 0).map(c => {
     const t = fundToday(c), mb = fundMainBucket(c);
@@ -874,7 +884,13 @@ function renderHoldings() {
       src: t?.src, date: t?.date, stale: !!t?.stale,
       bucket: mb.bucket, sub: mb.sub, cost, pnl, pnlPct,
       realized: rec.realized || 0};
-  }).sort((a, b) => (b.dayAmt ?? -1e18) - (a.dayAmt ?? -1e18));
+  }).sort((a, b) => (holdSort === "amt" ? b.amt - a.amt
+    : holdSort === "pnl" ? (b.pnl ?? -1e18) - (a.pnl ?? -1e18)
+    : (b.dayAmt ?? -1e18) - (a.dayAmt ?? -1e18)));
+  $("holdHead").innerHTML = `<span class="sort-head" data-sort="amt">基金 / 持有金额${holdSort==="amt"?" ▾":""}</span>
+    <span class="sort-head" data-sort="day">当日收益${holdSort==="day"?" ▾":""}</span>
+    <span>板块</span>
+    <span class="sort-head" data-sort="pnl">持有收益${holdSort==="pnl"?" ▾":""}</span>`;
   const total = rows.reduce((a, r) => a + r.amt, 0);
   const daySum = rows.reduce((a, r) => a + (r.dayAmt || 0), 0);
   $("holdTotal").textContent = fmtY(total);
@@ -902,8 +918,57 @@ function renderHoldings() {
     </div>`; }).join("")
     : `<div class="hempty">暂无持仓，去「录入」添加基金</div>`;
 }
+/* ---- 每日收益（对齐天天基金收益明细页）----
+   口径：无申赎假设下从最新市值逐日回折——amt_{t-1} = amt_t / (1+pct_t)，
+   每日收益 = amt_t − amt_{t-1}（比"快照×涨跌%"精确）。调仓日会失真。 */
+function dailyProfits(code, amtLatest, days) {
+  const nav = market?.funds?.[code]?.nav_history || [];
+  const out = [];                       // [{d, profit}] 时间倒序
+  let amt = amtLatest;
+  for (let i = nav.length - 1; i >= 0 && out.length < days; i--) {
+    const pct = nav[i].pct;
+    if (pct == null) continue;
+    out.push({d: nav[i].d, profit: Math.round((amt - amt / (1 + pct / 100)) * 100) / 100});
+    amt = amt / (1 + pct / 100);
+  }
+  return out;
+}
+function renderDailyProfits() {
+  const codes = Object.keys(amounts).filter(c => amounts[c].amt > 0);
+  const DAYS = 14;
+  if (!codes.length) { $("dailyTable").innerHTML = ""; return; }
+  const per = codes.map(c => ({c, name: amounts[c].name || market?.funds?.[c]?.name || c,
+    rows: dailyProfits(c, amounts[c].amt, DAYS)}));
+  const dateSet = new Set();
+  per.forEach(p => p.rows.forEach(r => dateSet.add(r.d)));
+  const dates = [...dateSet].sort().reverse().slice(0, DAYS);
+  let head = "<tr><th>日期</th>";
+  per.forEach(p => head += `<th>${esc(p.name.slice(0, 8))}</th>`);
+  head += "<th>组合</th></tr>";
+  let body = "";
+  for (const d of dates) {
+    let sum = 0, full = true;
+    let row = `<tr><td>${esc(d.slice(5))}</td>`;
+    for (const p of per) {
+      const v = p.rows.find(r => r.d === d)?.profit;
+      if (v == null) { row += `<td style="color:var(--ink-3)">—</td>`; full = false; }
+      else { row += `<td class="${cls(v)}">${(v >= 0 ? "+" : "") + v.toFixed(2)}</td>`; sum += v; }
+    }
+    row += `<td class="num ${cls(sum)}" ${full ? "" : 'style="color:var(--ink-3)"'}>${full ? (sum >= 0 ? "+" : "") + sum.toFixed(2) : "部分"}</td></tr>`;
+    body += row;
+  }
+  $("dailyTable").innerHTML = head + body;
+}
+/* 表头排序切换 */
+document.addEventListener("click", e => {
+  const s = e.target.closest(".sort-head");
+  if (s) { holdSort = s.dataset.sort; renderTxnView(); }
+});
+/* 表头排序切换结束 */
+
 function renderTxnView() {
   renderHoldings();
+  renderDailyProfits();
   const codes = Object.keys(amounts);
   $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>板块</th><th>金额</th><th>成本</th><th>已落袋</th><th></th></tr>" +
     (codes.length ? codes.map(c => {
@@ -1326,13 +1391,14 @@ $("modalOk").onclick = async () => {
       c = c.replace(/\D/g, "").slice(0, 6);
       if (!/^\d{6}$/.test(c)) continue;
     }
-    if (c && !amounts[c]) {   // 新基金 → 写 GitHub 清单
+    if (c && !amounts[c]) {   // 新基金 → 写 GitHub 清单（板块用名称快判）
+      const autoSec = sectorFromName(m.name, "");
       const ok = await ghWriteFunds(cfg => {
-        if (!cfg.find(f => f.code === c)) cfg.push({code:c, fallback:"综合",
+        if (!cfg.find(f => f.code === c)) cfg.push({code:c, fallback:autoSec || "综合",
           added:todayLocal(), note:m.name});
         return cfg; });
-      if (!ok) toast("GitHub 写入失败，此条基金未入清单（金额仍存本机）");
-      else fundsCfg.push({code:c, fallback:"综合"});
+      if (!ok) toast(`GitHub 写入失败，此条基金未入清单（金额仍存本机）`);
+      else fundsCfg.push({code:c, fallback:autoSec || "综合"});
     }
     if (!c) continue;
     const rec = amounts[c] || {amt: 0, cost: null, name: ""};

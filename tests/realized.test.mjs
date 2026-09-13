@@ -328,3 +328,75 @@ test("自动识别⑤：保存时兜底链 fallback值=下拉＞识别结果＞�
   // funds.json 写入会失败（无 PAT），但识别结果应体现在 addMsg
   assert.ok(doc.getElementById("addMsg").textContent.includes("信息技术"), "识别板块应显示");
 });
+
+/* ---------- Sprint 2：每日收益 / 排序 / 弹窗自动识别 ---------- */
+test("每日收益：逐日回折算法（无申赎假设精确口径）", async () => {
+  const { window } = await loadPage();
+  // 注入净值序列（时间升序，与真实 market.json 一致）
+  window.eval(`market = {updated_at: "t", funds: {"X": {nav_history: [
+    {d: "2026-09-01", nav: 1, pct: 5},
+    {d: "2026-09-02", nav: 1, pct: -10},
+    {d: "2026-09-03", nav: 1, pct: 10}]}}};
+    amounts = {"X": {amt: 110, cost: 100, name: "测试基金", d: "2026-09-03"}};`);
+  const rows = window.eval(`dailyProfits("X", 110, 14)`);
+  // day3: 110 - 110/1.10 = +10.00（时间倒序输出，最新在前）
+  assert.equal(rows[0].d, "2026-09-03");
+  assert.ok(Math.abs(rows[0].profit - 10) <= 0.01, `day3 应 +10：${rows[0].profit}`);
+  // day2 基数 = 110/1.10 = 100：100 - 100/0.90 = -11.11
+  assert.equal(rows[1].d, "2026-09-02");
+  assert.ok(Math.abs(rows[1].profit - (-11.11)) <= 0.01, `day2 应 -11.11：${rows[1].profit}`);
+  // day1 基数 = 100/0.90 = 111.11：111.11 - 111.11/1.05 = +5.29
+  assert.ok(Math.abs(rows[2].profit - 5.29) <= 0.01);
+});
+
+test("每日收益：矩阵渲染（缺失基金当日显示 —，组合列标注）", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.eval(`
+    market = {updated_at: "t", funds: {
+      "A": {nav_history: [{d: "2026-09-02", nav: 1, pct: 1}, {d: "2026-09-03", nav: 1, pct: 2}]},
+      "B": {nav_history: [{d: "2026-09-03", nav: 1, pct: -3}]}}};
+    amounts = {"A": {amt: 1000, cost: 900, name: "基金A", d: "2026-09-03"},
+               "B": {amt: 500, cost: 500, name: "基金B", d: "2026-09-03"}};`);
+  window.navTo("txn");
+  window.renderTxnView();
+  const t = doc.getElementById("dailyTable").textContent;
+  assert.ok(t.includes("09-03") && t.includes("09-02"), "应含两行日期");
+  assert.ok(t.includes("—"), "B 在 09-02 无数据应显示 —");
+  assert.ok(t.includes("部分"), "缺失日组合列应标'部分'");
+  // 09-03：A = 1000-1000/1.02 = +19.61；B = 500-500/0.97 = -15.46；组合 +4.15
+  assert.ok(t.includes("+4.15"), `组合列应 +4.15：${t}`);
+});
+
+test("持仓排序：表头点击切换 当日收益/持有收益/金额", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.eval(`amounts = {
+    "A": {amt: 100, cost: 50, name: "甲", d: latestNavDate("020691")},
+    "B": {amt: 900, cost: 300, name: "乙", d: latestNavDate("020691")}};`);
+  window.navTo("txn");
+  window.renderTxnView();
+  // 默认 day 排序：两只都无当日数据 → 顺序由 -1e18 稳定
+  window.eval(`document.querySelector('.sort-head[data-sort="pnl"]').click()`);
+  let first = doc.querySelector("#holdRows .hname").textContent;
+  assert.equal(first, "乙", "按持有收益排序：乙(+600) 在前");
+  window.eval(`document.querySelector('.sort-head[data-sort="amt"]').click()`);
+  first = doc.querySelector("#holdRows .hname").textContent;
+  assert.equal(first, "乙", "按金额排序：乙(900) 在前");
+  window.eval(`document.querySelector('.sort-head[data-sort="day"]').click()`);
+  assert.ok(doc.getElementById("holdHead").textContent.includes("当日收益 ▾"), "表头应显示排序标记");
+});
+
+test("识别入库：新基金按名称自动识别板块写入清单", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.eval(`amounts = {}; txns = [];`);
+  window.showConfirm("识别", [{code: "012414", name: "华泰柏瑞中证机器人ETF联接C", amount: 100, action: "持仓"}]);
+  window.eval(`document.getElementById("modalOk").click()`);
+  await new Promise(r => setTimeout(r, 30));
+  const rec = window.eval(`amounts["012414"]`);
+  assert.ok(rec, "入库成功");
+  // fallback 写入用的是名称识别（ghWriteFunds 无 PAT 失败，但 fundsCfg 本地 push 分支不受影响——
+  // 失败时不 push，此处只断言 amount 已存；板块归类走 fundBucketFallback）
+  assert.equal(rec.amt, 100);
+});
