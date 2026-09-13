@@ -458,3 +458,68 @@ test("URL 一键导入：base64 数据经确认后写入 amounts", async () => {
   assert.equal(rec.cost, 149.44);
   assert.equal(rec.realized, 0, "累计收益-40.21 == 持有收益 → 已落袋补差 0，不重复计入");
 });
+
+/* ---------- Sprint 3：YTD / 基准 / 未披露拆解 / 成本引导 ---------- */
+test("YTD：年初至今净值加权收益", async () => {
+  const { window } = await loadPage();
+  // fixture：去年一天 + 今年两天（+10%、-5%）→ YTD = 1.10*0.95-100 = +4.5%
+  window.eval(`market = {updated_at: "t", funds: {"X": {nav_history: [
+    {d: "2025-12-30", nav: 1, pct: 1},
+    {d: "2026-01-05", nav: 1, pct: 10},
+    {d: "2026-01-06", nav: 1, pct: -5}]}}};
+    amounts = {"X": {amt: 100, cost: 100, name: "X", d: "2026-01-06"}};`);
+  const c = window.eval(`compute()`);
+  assert.ok(Math.abs(c.ytd - 4.5) <= 0.01, `YTD 应 +4.5%：${c.ytd}`);
+});
+
+test("基准：沪深300 对齐组合日期并指数化", async () => {
+  const { window } = await loadPage();
+  window.eval(`market = {updated_at: "t", benchmark: {name: "沪深300", klines: [
+    {d: "2026-01-02", close: 4000},
+    {d: "2026-01-05", close: 4100},
+    {d: "2026-01-06", close: 4200}]},
+    funds: {"X": {nav_history: [
+      {d: "2026-01-05", nav: 1, pct: 2},
+      {d: "2026-01-06", nav: 1, pct: 3}]}}};
+    amounts = {"X": {amt: 100, cost: 100, name: "X", d: "2026-01-06"}};`);
+  const c = window.eval(`compute()`);
+  assert.ok(c.bench, "应生成基准序列");
+  assert.equal(c.bench.name, "沪深300");
+  assert.ok(Math.abs(c.bench.idx[0] - 102.5) <= 0.01, `基点 4100→102.5：${c.bench.idx[0]}`);
+  assert.ok(Math.abs(c.bench.idx[1] - 105) <= 0.01, `4200/4100*100=105：${c.bench.idx[1]}`);
+});
+
+test("未披露拆解：桶内成员与 compute 口径一致，可跳转选板块", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  // 020691 真实行业数据含「未披露/其他」31.7% → compute 的未披露桶应含它
+  window.eval(`amounts = {"020691": {amt: 100, cost: 90, name: "通信设备A", d: latestNavDate("020691")}};`);
+  window.renderDash();
+  const funds = window.eval(`lastCompute?.sectors?.["未披露"]?.funds`);
+  assert.ok(funds && funds.has("020691"), "compute 未披露桶应含 020691");
+  window.openSectorPicker({bucket: "未披露", funds});
+  const t = doc.getElementById("secList").textContent;
+  assert.ok(t.includes("通信设备A"), `应列出桶内基金：${t}`);
+  // 点「选板块」→ 切到该基金的板块列表
+  window.eval(`document.querySelector(".pick-fund").click()`);
+  assert.ok(doc.getElementById("secModalTitle").textContent.includes("通信设备A"), "应切换到该基金");
+});
+
+test("待补成本引导条：未录成本时显示，点击列出清单", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.eval(`amounts = {
+    "020691": {amt: 100, cost: 90, name: "已录成本", d: latestNavDate("020691")},
+    "002771": {amt: 100, name: "未录成本基金", d: latestNavDate("002771")}};`);
+  window.navTo("txn");
+  window.renderTxnView();
+  assert.equal(doc.getElementById("costAlert").style.display, "block", "应有引导条");
+  assert.ok(doc.getElementById("costAlertText").textContent.includes("1 只"), "应显示 1 只");
+  window.eval(`document.getElementById("costAlertBtn").click()`);
+  const t = doc.getElementById("secList").textContent;
+  assert.ok(t.includes("未录成本基金"), "应列出未录成本基金");
+  assert.ok(!t.includes("已录成本"), "不应列已录成本的");
+  // 全部补录后引导条消失
+  window.eval(`amounts["002771"].cost = 80; lsSet(LS.amt, amounts); renderTxnView();`);
+  assert.equal(doc.getElementById("costAlert").style.display, "none", "补完应隐藏");
+});

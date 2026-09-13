@@ -29,7 +29,6 @@ SECTORS_FILE = ROOT / "data" / "sectors.json"
 UA = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
       "Referer": "http://fundf10.eastmoney.com/"}
 MOB = "https://fundmobapi.eastmoney.com/FundMNewApi"
-NAV_DAYS = 40          # 净值历史条数，支撑近30天波动指标
 STOCK_SLEEP = 0.25     # 个股行业查询间隔，礼貌抓取
 FUND_SLEEP = 0.5
 
@@ -109,11 +108,13 @@ def fetch_industries(code: str) -> dict:
 
 
 def fetch_nav_history(code: str) -> list:
-    """lsjz 每页封顶20条，翻页取满 NAV_DAYS 天。"""
-    out = []
-    for page in (1, 2):
+    """今年以来净值（lsjz 按日期范围翻页抓全），支撑 YTD/全年走势/近30天。"""
+    year_start = f"{datetime.date.today().year}-01-01"
+    out, page = [], 1
+    while page <= 25:   # 安全上限：一年约 250 交易日 ≈ 13 页
         d = get_json(f"https://api.fund.eastmoney.com/f10/lsjz"
-                     f"?fundCode={code}&pageIndex={page}&pageSize=20")
+                     f"?fundCode={code}&pageIndex={page}&pageSize=20"
+                     f"&startDate={year_start}&endDate={datetime.date.today().year}-12-31")
         rows = ((d.get("Data") or {}).get("LSJZList")) or []
         for r in rows:
             try:
@@ -123,9 +124,29 @@ def fetch_nav_history(code: str) -> list:
                                    else float(r["JZZZL"])})
             except (KeyError, TypeError, ValueError):
                 continue
-        if len(out) >= NAV_DAYS or not rows:
+        total = d.get("TotalCount") or 0
+        if not rows or page * 20 >= total:
             break
-    return list(reversed(out[-NAV_DAYS:]))   # 时间升序，方便直接画线
+        page += 1
+        time.sleep(0.15)
+    return sorted([x for x in out if x["d"] >= year_start], key=lambda x: x["d"])
+
+
+def fetch_benchmark() -> dict:
+    """沪深300 今年以来日线收盘（腾讯财经接口，对脚本友好且稳定），
+    作为组合走势基准。"""
+    year = datetime.date.today().year
+    d = get_json(f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+                 f"?param=sh000300,day,{year}-01-01,{year}-12-31,320,qfq",
+                 timeout=15)
+    day = ((d.get("data") or {}).get("sh000300") or {}).get("day") or []
+    kl = []
+    for row in day:
+        try:
+            kl.append({"d": row[0], "close": float(row[2])})   # row[2]=收盘
+        except (IndexError, ValueError):
+            continue
+    return {"name": "沪深300", "klines": kl}
 
 
 def fetch_sectors() -> list:
@@ -170,6 +191,19 @@ def main() -> int:
             market["funds"] = old.get("funds", {})
         except (json.JSONDecodeError, OSError):
             pass
+
+    bm = {"name": "沪深300", "klines": []}
+    try:
+        bm = fetch_benchmark()
+        print(f"benchmark: {len(bm['klines'])} 天")
+    except Exception as e:
+        print(f"ERR benchmark: {e}", file=sys.stderr)
+        if MARKET_FILE.exists():
+            try:
+                bm = json.loads(MARKET_FILE.read_text("utf-8")).get("benchmark") or bm
+            except (json.JSONDecodeError, OSError):
+                pass
+    market["benchmark"] = bm
 
     errors = []
     for code in codes:

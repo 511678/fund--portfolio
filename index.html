@@ -86,7 +86,7 @@
   .hero-pnl { font-size:16px; font-weight:650; margin-top:6px; }
   .hero-pnl .sub { font-size:12px; font-weight:500; color:var(--ink-3); margin-left:6px; }
   .hero-delta { font-size:14px; font-weight:600; }
-  .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
   .tile .label { font-size:12px; color:var(--ink-3); }
   .tile .value { font-size:22px; font-weight:650; margin:2px 0; }
   .tile .sub { font-size:12px; color:var(--ink-2); }
@@ -218,7 +218,7 @@
     .hold-head, .hrow { grid-template-columns:minmax(0,1fr) 64px 56px 64px; gap:6px; }
     .hcol { font-size:13px; }
   }
-  @media (max-width:420px) { .kpis { grid-template-columns:1fr 1fr; } }
+  @media (max-width:960px) { .kpis { grid-template-columns:1fr 1fr; } }
 
   /* 手机底部导航 */
   .tabbar { position:fixed; left:0; right:0; bottom:0; display:none;
@@ -277,9 +277,14 @@
             <div class="sub" id="kpi30Sub">净值加权</div>
           </div>
           <div class="card tile">
-            <div class="label">最大单日跌幅 · 近30天</div>
+            <div class="label">最大回撤 · 今年</div>
             <div class="value down num" id="kpiMdd">—</div>
             <div class="sub" id="kpiMddSub">组合口径</div>
+          </div>
+          <div class="card tile">
+            <div class="label">今年以来</div>
+            <div class="value num" id="kpiYtd">—</div>
+            <div class="sub" id="kpiYtdSub">净值加权</div>
           </div>
         </div>
       </section>
@@ -384,6 +389,10 @@
 
   <!-- ============ 明细 ============ -->
   <section class="view" id="view-txn">
+    <div class="alert" id="costAlert">
+      <span id="costAlertText"></span>
+      <button class="btn b-mini" id="costAlertBtn" style="margin-left:10px">逐一补录</button>
+    </div>
     <div class="card">
       <h3>持仓列表 <span class="hdate" id="holdDate"></span></h3>
       <div class="hold-sum">
@@ -493,11 +502,11 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js?v=8"></script>
+<script src="js/core.js?v=9"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v8";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v9";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -702,6 +711,27 @@ function compute() {
       if (dd < mdd) { mdd = dd; mddD = dates[i]; }
       return idx; });
     out.mdd = mdd; out.mddDate = mddD;
+    // 今年以来收益（净值加权，数据自年初起）
+    const yIdx = dates.findIndex(d => d >= `${todayLocal().slice(0, 4)}-01-01`);
+    if (yIdx >= 0) {
+      let iy = 100;
+      for (let i = yIdx; i < pr.length; i++) iy *= 1 + pr[i] / 100;
+      out.ytd = iy - 100;
+    }
+    // 基准（沪深300）对齐组合日期并指数化
+    const bm = market?.benchmark?.klines || [];
+    if (bm.length) {
+      const bmMap = new Map(bm.map(k => [k.d, k.close]));
+      let base = null;
+      for (const k of bm) if (k.d < dates[0]) base = k;   // 严格早于起点日
+      if (!base) base = bm[0];
+      const bd = [], bi = [];
+      for (const d of dates) {
+        const c = bmMap.get(d);
+        if (c != null && base.close) { bd.push(d); bi.push(c / base.close * 100); }
+      }
+      if (bi.length >= 2) out.bench = {name: market?.benchmark?.name || "沪深300", dates: bd, idx: bi};
+    }
     const n30 = Math.min(30, pr.length - 1);
     out.n30 = n30;
     let i30 = 100; for (let i = pr.length - n30; i < pr.length; i++) i30 *= 1 + pr[i]/100;
@@ -739,6 +769,7 @@ function renderDash() {
   $("dashBody").classList.toggle("hide", !hasFund);
   if (!hasFund) { $("updBadge").textContent = market ? "更新于 " + (market.updated_at||"") : "无数据"; return; }
   const c = compute();
+  lastCompute = c;
   // 盘中实时校准今日涨跌（估值/最新净值优先于 Action 抓的净值序列）
   let pSum = 0, pW = 0, srcLive = "";
   let lastDate = "", staleCnt = 0;
@@ -789,6 +820,12 @@ function renderDash() {
     + (c.n30 != null && c.n30 < 30 ? ` · 仅${c.n30}天样本` : " · 当前权重");
   $("kpiMdd").textContent = c.mdd.toFixed(1) + "%";
   $("kpiMddSub").textContent = c.mddDate || "组合口径";
+  const ky = $("kpiYtd");
+  if (c.ytd != null) {
+    ky.textContent = sign(c.ytd, 1);
+    ky.className = "value num " + cls(c.ytd);
+    $("kpiYtdSub").textContent = fmtY(c.total * c.ytd / 100) + " · 当前权重";
+  } else { ky.textContent = "—"; ky.className = "value num"; $("kpiYtdSub").textContent = "数据不足"; }
 
   // 集中度预警 >25%（未披露部分不是真实配置，不参与预警）
   const big = Object.entries(c.sectors)
@@ -835,7 +872,7 @@ function renderDash() {
         <circle cx="${last[0]}" cy="${last[1]}" r="4" fill="${cssv(BUCKET_COLOR[b])}"
           stroke="${cssv("--surface")}" stroke-width="2"/></svg>`;
     }
-    return `<div class="card scard">
+    return `<div class="card scard" ${b === "未披露" ? `data-bucket="未披露" style="cursor:pointer" title="点击拆解到更细板块"` : ""}>
       <div class="row1"><span class="sw" style="background:${cssv(BUCKET_COLOR[b])}"></span>
         <span class="name">${esc(b)}</span><span style="flex:1"></span>
         <span class="num ${cls(s.w7)}" style="font-size:13px;font-weight:600">${s.w7==null?"—":sign(s.w7)}</span></div>
@@ -852,16 +889,34 @@ function renderDash() {
   const t = c.trend;
   if (t.dates.length >= 2) {
     const W=680, H=200, padL=40, padR=12, padT=12, padB=20;
-    const mn = Math.min(...t.idx), mx = Math.max(...t.idx);
+    const bidx = c.bench?.idx || [];
+    const mn = Math.min(...t.idx, ...(bidx.length ? bidx : t.idx));
+    const mx = Math.max(...t.idx, ...(bidx.length ? bidx : t.idx));
     const xs = i => padL + i/(t.idx.length-1)*(W-padL-padR);
     const ys = v => padT + (1-(v-mn)/(mx-mn||1))*(H-padT-padB);
     const pts = t.idx.map((v,i) => `${xs(i)},${ys(v)}`).join(" ");
+    // 基准线：按组合日期索引对齐（基准可能缺某日 → 分段）
+    let benchSvg = "", benchTxt = "";
+    if (bidx.length >= 2 && c.bench) {
+      const bpts = [];
+      for (let i = 0; i < t.dates.length; i++) {
+        const bi = c.bench.dates.indexOf(t.dates[i]);
+        if (bi >= 0) bpts.push(`${xs(i)},${ys(c.bench.idx[bi])}`);
+      }
+      if (bpts.length >= 2)
+        benchSvg = `<polyline points="${bpts.join(" ")}" fill="none"
+          stroke="${cssv("--ink-3")}" stroke-width="1.5" stroke-dasharray="4 3" opacity=".9"/>`;
+      const bEnd = c.bench.idx.at(-1);
+      benchTxt = `基准 ${c.bench.name} ${bEnd >= 100 ? "+" : ""}${(bEnd - 100).toFixed(1)}%（虚线）`;
+    }
     $("trend").innerHTML =
       `<polygon points="${padL},${ys(mn)} ${pts} ${xs(t.idx.length-1)},${ys(mn)}"
          fill="${cssv("--s1")}" opacity=".1"/>
        <polyline points="${pts}" fill="none" stroke="${cssv("--s1")}" stroke-width="2"/>
+       ${benchSvg}
        <text x="${padL}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}">${esc(t.dates[0])}</text>
-       <text x="${W-padR}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}" text-anchor="end">${esc(t.dates.at(-1))}</text>`;
+       <text x="${W-padR}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}" text-anchor="end">${esc(t.dates.at(-1))}</text>
+       <text x="${W-padR-4}" y="${padT+10}" font-size="10" text-anchor="end" fill="${cssv("--ink-2")}">— 组合${benchTxt ? " ｜ " + esc(benchTxt) : ""}</text>`;
     const step = Math.ceil(t.dates.length/8);
     $("trendTable").innerHTML = "<tr><th>日期</th><th>指数</th></tr>" +
       t.dates.map((d,i) => (i%step===0 || i===t.dates.length-1)
@@ -969,6 +1024,11 @@ document.addEventListener("click", e => {
 function renderTxnView() {
   renderHoldings();
   renderDailyProfits();
+  const noCost = Object.keys(amounts).filter(c => amounts[c].amt > 0 && amounts[c].cost == null);
+  $("costAlert").style.display = noCost.length ? "block" : "none";
+  if (noCost.length)
+    $("costAlertText").textContent =
+      `⚠️ ${noCost.length} 只基金未录成本，暂不计入持有盈亏（不影响已落袋）`;
   const codes = Object.keys(amounts);
   $("myFundsTable").innerHTML = "<tr><th>基金</th><th>代码</th><th>板块</th><th>金额</th><th>成本</th><th>已落袋</th><th></th></tr>" +
     (codes.length ? codes.map(c => {
@@ -1461,16 +1521,42 @@ async function loadSectors() {
 }
 function openSectorPicker(target) {
   sectorTarget = target;
+  $("secSearch").value = "";
+  $("secModalBg").classList.add("on");
+  if (target.bucket) return renderBucketFunds(target.bucket, "sector", target.funds);
+  if (target.noCost) return renderBucketFunds("__noCost", "cost");
   $("secModalTitle").textContent = target.code
     ? `选择板块 · ${amounts[target.code]?.name || target.code}`
     : "选择板块（新基金）";
-  $("secSearch").value = "";
-  $("secModalBg").classList.add("on");
   renderSectorList("");
   loadSectors().then(list => {
     if (list.length) { $("secSrcHint").textContent = `（共 ${list.length} 个）`; renderSectorList($("secSearch").value); }
     else $("secList").innerHTML = `<div class="hempty">板块列表加载失败，请检查网络后重试</div>`;
   });
+}
+/* 桶内基金清单：逐只指定板块（bucket 模式）或补录成本（noCost 模式） */
+let lastCompute = null;
+function renderBucketFunds(bucket, mode, funds) {
+  const codes = Object.keys(amounts).filter(c => amounts[c].amt > 0 || amounts[c].realized);
+  const inBucket = funds ? [...funds].filter(c => amounts[c])
+    : bucket === "__noCost" ? codes.filter(c => amounts[c].cost == null)
+    : codes.filter(c => fundMainBucket(c).bucket === bucket);
+  $("secModalTitle").textContent = bucket === "__noCost"
+    ? `补录成本 · ${inBucket.length} 只`
+    : `「${bucket}」拆解 · ${inBucket.length} 只`;
+  $("secSrcHint").textContent = bucket === "__noCost"
+    ? "成本 = App 资产详情页的「持仓成本」；填完一只自动刷新"
+    : "给每只基金指定更细的板块，拆完环形图更真实";
+  $("secList").innerHTML = inBucket.length ? inBucket.map(c => {
+    const rec = amounts[c];
+    const cur = bucket === "__noCost" ? "未录" : esc(fundMainBucket(c).sub || fundMainBucket(c).bucket);
+    const btn = mode === "cost"
+      ? `<button class="btn b-mini pick-cost" data-code="${esc(c)}">✎ 成本</button>`
+      : `<button class="btn b-mini pick-fund" data-code="${esc(c)}">选板块</button>`;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rec.name || c)} <span style="color:var(--ink-3);font-size:12px">${esc(c)}</span></span>
+      <span style="color:var(--ink-3);font-size:12px">${cur}</span>${btn}</div>`;
+  }).join("") : `<div class="hempty">这一桶已经空了 🎉</div>`;
 }
 function renderSectorList(filter) {
   const list = sectorCache?.list || [];
@@ -1521,6 +1607,26 @@ document.addEventListener("click", e => {
 document.addEventListener("click", e => {
   const b = e.target.closest(".pick-sector");
   if (b) openSectorPicker({code: b.dataset.code});
+  const pf = e.target.closest(".pick-fund");
+  if (pf) { sectorTarget = {code: pf.dataset.code}; $("secSearch").value = "";
+    $("secModalTitle").textContent = `选择板块 · ${amounts[pf.dataset.code]?.name || pf.dataset.code}`;
+    $("secSrcHint").textContent = "";
+    renderSectorList("");
+    loadSectors().then(list => { if (list.length) renderSectorList($("secSearch").value); });
+  }
+  const pc = e.target.closest(".pick-cost");
+  if (pc) { setCost(pc.dataset.code); renderBucketFunds("__noCost", "cost"); }
+});
+/* 总览「未披露」卡片拆解入口 + 明细页待补成本引导 */
+document.addEventListener("click", e => {
+  const card = e.target.closest(".scard");
+  if (card && card.dataset.bucket === "未披露") {
+    const funds = lastCompute?.sectors?.["未披露"]?.funds;
+    openSectorPicker({bucket: "未披露", funds});
+  }
+});
+document.addEventListener("click", e => {
+  if (e.target.closest("#costAlertBtn")) openSectorPicker({noCost: true});
 });
 
 /* ================= 设置 ================= */
