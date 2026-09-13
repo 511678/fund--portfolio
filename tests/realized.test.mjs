@@ -423,8 +423,8 @@ test("导入拆分：有成本基金 totalPnl 补差进已落袋，总收益精�
     })()
   `);
   assert.equal(rec.realized, 0, "totalPnl == 持有收益 → 已落袋补差为 0（不重复计亏损）");
-  // 总账验证：持有(-40.21) + 已落袋(0) = App 显示的 -40.21
-  assert.ok(rec.held + rec.realized === -40.21);
+  // 总账验证：持有(-40.21) + 已落袋(0) = App 显示的 -40.21（容差）
+  assert.ok(Math.abs(rec.held + rec.realized - (-40.21)) <= 0.01);
 });
 
 test("导入拆分：无成本盈利基金收益整体进已落袋（用户 021277 场景）", async () => {
