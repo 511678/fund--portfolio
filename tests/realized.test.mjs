@@ -400,3 +400,43 @@ test("识别入库：新基金按名称自动识别板块写入清单", async ()
   // 失败时不 push，此处只断言 amount 已存；板块归类走 fundBucketFallback）
   assert.equal(rec.amt, 100);
 });
+
+/* ---------- 导入语义：realized 列 = App 累计收益，入库自动拆分 ---------- */
+test("导入拆分：有成本基金 totalPnl 补差进已落袋，总收益精确等于 App 数字", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  // 文件模拟：市值 109.23、成本 149.44、App 累计收益 -40.21（= 市值-成本，用户 020640 实况）
+  window.eval(`amounts = {}; txns = [];`);
+  const file = JSON.stringify({amounts: {
+    "020640": {amt: 109.23, cost: 149.44, name: "广发半导体设备ETF联接C", realized: -40.21, d: "2026-09-11"}
+  }});
+  window.eval(`window.File && 0`);
+  // 直接走导入清洗的等价路径：手工调用内部的清洗段不方便，改用数据 API 复现
+  // （导入 handler 依赖 FileReader/input，这里用同规则验证拆分数学）
+  const rec = window.eval(`
+    (function () {
+      const v = ${file}.amounts["020640"];
+      const amt = +v.amt, cost = +v.cost;
+      const held = amt - cost;                 // -40.21
+      const totalPnl = +v.realized;            // -40.21
+      return {realized: FP.round2(totalPnl - held), held};
+    })()
+  `);
+  assert.equal(rec.realized, 0, "totalPnl == 持有收益 → 已落袋补差为 0（不重复计亏损）");
+  // 总账验证：持有(-40.21) + 已落袋(0) = App 显示的 -40.21
+  assert.ok(rec.held + rec.realized === -40.21);
+});
+
+test("导入拆分：无成本盈利基金收益整体进已落袋（用户 021277 场景）", async () => {
+  const { window } = await loadPage();
+  const rec = window.eval(`
+    (function () {
+      const amt = 131.24, cost = null, totalPnl = 601.38;
+      const held = cost != null ? amt - cost : null;
+      return {realized: FP.round2(held == null ? totalPnl : totalPnl - held), hasCost: cost != null};
+    })()
+  `);
+  assert.equal(rec.realized, 601.38, "无成本 → 收益整体进已落袋");
+  assert.equal(rec.hasCost, false, "盈利基金无需填成本");
+  // Hero 总账口径：未录成本不计持有 → 累计盈亏 = 0(持有) + 601.38 = App 数字 ✅
+});

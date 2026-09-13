@@ -493,11 +493,11 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js?v=6"></script>
+<script src="js/core.js?v=7"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v6";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v7";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -1580,12 +1580,17 @@ $("fileImport").onchange = e => {
         const amt = +v?.amt;
         if (!/^\d{6}$/.test(k) || !(amt >= 0)) continue;
         const rec = {amt, name: String(v?.name ?? "").slice(0, 60)};
-        const cost = +v?.cost;                    // 成本/快照日/已落袋可选
+        const cost = +v?.cost;                    // 成本/快照日可选
         if (cost > 0) rec.cost = FP.round2(cost);
         if (/^\d{4}-\d{2}-\d{2}$/.test(String(v?.d || ""))) rec.d = v.d;
-        const realized = +v?.realized;
-        if (v?.realized != null && v.realized !== "" && isFinite(realized))
-          rec.realized = FP.round2(realized);
+        // realized 语义 = App 显示的累计收益（含未赎回浮盈），入库时拆分：
+        //   有成本 → 持有收益(amt-cost) 已表达一部分，差额补进已落袋
+        //   无成本 → 收益整体放已落袋（持有收益显示"未录成本"）
+        const totalPnl = +v?.realized;
+        if (v?.realized != null && v.realized !== "" && isFinite(totalPnl)) {
+          const held = rec.cost != null ? amt - rec.cost : null;
+          rec.realized = FP.round2(held == null ? totalPnl : totalPnl - held);
+        }
         clean[k] = rec;
       }
       amounts = clean; lsSet(LS.amt, amounts);

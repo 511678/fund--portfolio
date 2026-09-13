@@ -67,7 +67,7 @@
      amounts[c] = {amt 市值快照, cost 累计投入成本, d 快照对应净值日 YYYY-MM-DD}
      盈亏 = amt − cost；cost 未录 = null（不参与组合盈亏，不显示误导性 0）。 */
 
-  const round2 = n => Math.round(n * 100) / 100;
+  const round2 = n => Math.round(n * 100) / 100 || 0;   // ||0 消 -0（浮点差额）
 
   /* 快照市值滚到最新净值日：对 nav 中日期 > fromDate 的每日涨跌累乘。
      fromDate 早于数据起点则滚可见段；无更新（fromDate ≥ 最新日）返回 null。 */
