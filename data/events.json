@@ -1,12 +1,22 @@
 {
  "updated": "2026-09-14",
- "sources": "federalreserve.gov（FOMC）｜ bls.gov（CPI）｜ 交易所规则（财报截止）",
+ "sources": "federalreserve.gov（FOMC）｜ boj.or.jp（日本央行）｜ bok.or.kr（韩国央行）｜ bls.gov（CPI）｜ 公司 IR（财报，未公布日期标「预计」）｜ 交易所规则",
  "events": [
-  {"d": "2026-09-16", "type": "fed", "title": "美联储 FOMC 利率决议", "note": "北京时间 9/17 02:00 声明、02:30 发布会", "src": "federalreserve.gov"},
+  {"d": "2026-09-18", "type": "boj", "title": "日本央行利率决议（9/17-18 会议）", "note": "东京时间 9/18 午后公布，北京时间约 13:30 前后", "src": "boj.or.jp"},
+  {"d": "2026-10-22", "type": "bok", "title": "韩国央行利率决议（今年第 7 次）", "note": "现基准利率 3.00%（8/27 加息后）", "src": "bok.or.kr"},
   {"d": "2026-10-14", "type": "cpi", "title": "美国 9 月 CPI", "note": "北京时间 20:30（夏令时）", "src": "bls.gov"},
+  {"d": "2026-10-15", "type": "earn", "title": "台积电 Q3 财报（预计）", "note": "惯例 10 月中旬，具体以 IR 为准；半导体链风向标", "src": "公司 IR 惯例"},
+  {"d": "2026-10-21", "type": "earn", "title": "特斯拉 Q3 财报（预计）", "note": "惯例打头阵，以 IR 为准", "src": "公司 IR 惯例"},
+  {"d": "2026-10-28", "type": "earn", "title": "微软 / 谷歌 / Meta 财报（预计）", "note": "巨头财报周开启，盘后披露", "src": "公司 IR 惯例"},
   {"d": "2026-10-28", "type": "fed", "title": "美联储 FOMC 利率决议", "note": "北京时间 10/29 02:00", "src": "federalreserve.gov"},
-  {"d": "2026-10-28", "type": "earn", "title": "美股科技巨头 Q3 财报周", "note": "微软/苹果/谷歌/Meta/亚马逊约 10/28-11/7 集中披露，英伟达约 11 月下旬；具体日期以各公司 IR 为准", "src": "公司 IR 惯例窗口"},
+  {"d": "2026-10-29", "type": "earn", "title": "苹果 / 亚马逊财报（预计）", "note": "盘后披露", "src": "公司 IR 惯例"},
+  {"d": "2026-10-30", "type": "boj", "title": "日本央行利率决议（10/29-30 会议）", "note": "东京时间 10/30 午后公布", "src": "boj.or.jp"},
   {"d": "2026-10-31", "type": "cn", "title": "A 股三季报披露截止", "note": "全部上市公司季报披露完成", "src": "沪深交易所规则"},
-  {"d": "2026-12-09", "type": "fed", "title": "美联储 FOMC 利率决议", "note": "北京时间 12/10 02:00", "src": "federalreserve.gov"}
+  {"d": "2026-11-17", "type": "earn", "title": "英伟达 Q3 财报（已确认）", "note": "盘后披露；AI 产业链最重要风向标", "src": "Wall Street Horizon 确认"},
+  {"d": "2026-11-26", "type": "bok", "title": "韩国央行利率决议（今年第 8 次）", "note": "今年最后一次", "src": "bok.or.kr"},
+  {"d": "2026-11-13", "type": "earn", "title": "腾讯 / 阿里巴巴 季报（预计）", "note": "惯例 11 月中旬，中概股风向", "src": "公司 IR 惯例"},
+  {"d": "2026-10-29", "type": "earn", "title": "三星电子 Q3 初步业绩（预计）", "note": "月初发正式版，月末先出初步数据；SK 海力士同期", "src": "公司 IR 惯例"},
+  {"d": "2026-12-09", "type": "fed", "title": "美联储 FOMC 利率决议", "note": "北京时间 12/10 02:00", "src": "federalreserve.gov"},
+  {"d": "2026-12-18", "type": "boj", "title": "日本央行利率决议（12/17-18 会议）", "note": "东京时间 12/18 午后公布", "src": "boj.or.jp"}
  ]
 }

@@ -45,12 +45,8 @@ async function loadPage() {
         const u = String(url);
         if (u.includes("market.json")) return {ok: true, status: 200, json: async () => marketData};
         if (u.includes("funds.json")) return {ok: true, status: 200, json: async () => fundsData};
-        if (u.includes("events.json")) return {ok: true, status: 200, json: async () => ({
-          updated: "2026-09-14", events: [
-            {d: "2026-09-16", type: "fed", title: "美联储 FOMC 利率决议", note: "test"},
-            {d: "2026-10-28", type: "earn", title: "美股科技巨头 Q3 财报周", note: "test"},
-            {d: "2026-10-31", type: "cn", title: "A 股三季报披露截止", note: "test"}
-          ]})};
+        if (u.includes("events.json")) return {ok: true, status: 200, json: async () =>
+          JSON.parse(readFileSync(join(ROOT, "..", "data", "events.json"), "utf8"))};
         throw new TypeError("network blocked in test: " + u);
       };
     },
@@ -561,4 +557,16 @@ test("大事日历：自定义事件可添加、可删除", async () => {
   await new Promise(r => setTimeout(r, 60));   // renderEvents 异步
   window.eval(`document.querySelector(".ev-del").click()`);
   assert.equal(window.eval(`lsGet(LS.events, []).length`), 0, "删除后清空");
+});
+
+test("大事日历：日韩央行与龙头财报事件渲染", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.eval(`eventsCache = null;`);
+  await window.eval(`renderEvents()`);
+  const strip = doc.getElementById("evStrip").textContent;
+  assert.ok(strip.includes("日本央行利率决议"), "应含日本央行");
+  assert.ok(strip.includes("韩国央行利率决议"), "应含韩国央行");
+  assert.ok(strip.includes("英伟达"), "应含英伟达财报（11/17 确认，在 95 天视界内）");
+  assert.ok(strip.includes("微软 / 谷歌 / Meta"), "应含巨头财报周");
 });

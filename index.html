@@ -330,7 +330,7 @@
         <h3>大事日历 <span style="font-weight:400" id="evSrcHint">官方日程（美联储/BLS/交易所）· 横向滑动查看</span>
           <button class="btn b-mini ev-add" id="evAdd">＋ 添加</button></h3>
         <div class="ev-strip" id="evStrip"></div>
-        <div class="hint">FOMC/CPI 为官方公布日期；非农=每月首个周五、LPR=每月 20 日（节假日顺延）、PMI=月末，为规则性日程；财报窗口以各公司 IR 为准。可点「＋添加」记自己的提醒。</div>
+        <div class="hint">FOMC/日韩央行/CPI 为官方公布日期；非农=每月首个周五、LPR=每月 20 日（节假日顺延）、PMI=月末，为规则性日程；财报标注「预计」的以各公司 IR 为准。可点「＋添加」记自己的提醒。</div>
       </section>
 
       <section class="card">
@@ -529,11 +529,11 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js?v=10"></script>
+<script src="js/core.js?v=11"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v10";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v11";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -1286,7 +1286,7 @@ $("btnAddTxn").onclick = () => {
 
 /* ================= 大事日历 ================= */
 let eventsCache = null;
-const EV_ICON = {fed:"🏦", cpi:"📈", job:"💼", cn:"🇨🇳", earn:"🏢", user:"⭐"};
+const EV_ICON = {fed:"🏦", boj:"🇯🇵", bok:"🇰🇷", cpi:"📈", job:"💼", cn:"🇨🇳", earn:"🏢", user:"⭐"};
 const evPad = n => String(n).padStart(2, "0");
 const evShift = (d, days) => {
   const t = new Date(d + "T00:00:00"); t.setDate(t.getDate() + days); return todayLocal(t);
@@ -1326,7 +1326,7 @@ async function renderEvents() {
   const seen = new Set();
   const all = [...builtin, ...ruleEvents(year), ...user.map(u => ({...u, _user: true}))]
     .filter(e => { const k = e.d + "|" + e.title; if (seen.has(k)) return false; seen.add(k); return true; })
-    .filter(e => e.d >= evShift(today, -2) && e.d <= evShift(today, 75))
+    .filter(e => e.d >= evShift(today, -2) && e.d <= evShift(today, 95))
     .sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0);
   $("evStrip").innerHTML = all.length ? all.map(e => {
     const diff = dayDiff(today, e.d);
@@ -1338,7 +1338,7 @@ async function renderEvents() {
       <div class="ev-title">${esc(e.title)}</div>
       <div class="ev-date">${esc(e.d.slice(5).replace("-", "/"))}${e.note ? " · " + esc(e.note) : ""}</div>
     </div>`;
-  }).join("") : `<div class="hempty">近期 75 天内没有已收录的大事</div>`;
+  }).join("") : `<div class="hempty">近期 95 天内没有已收录的大事</div>`;
 }
 $("evAdd").onclick = () => {
   const d = prompt("事件日期（YYYY-MM-DD，如 2026-11-19）", todayLocal());
