@@ -1,0 +1,12 @@
+{
+ "updated": "2026-09-14",
+ "sources": "federalreserve.gov（FOMC）｜ bls.gov（CPI）｜ 交易所规则（财报截止）",
+ "events": [
+  {"d": "2026-09-16", "type": "fed", "title": "美联储 FOMC 利率决议", "note": "北京时间 9/17 02:00 声明、02:30 发布会", "src": "federalreserve.gov"},
+  {"d": "2026-10-14", "type": "cpi", "title": "美国 9 月 CPI", "note": "北京时间 20:30（夏令时）", "src": "bls.gov"},
+  {"d": "2026-10-28", "type": "fed", "title": "美联储 FOMC 利率决议", "note": "北京时间 10/29 02:00", "src": "federalreserve.gov"},
+  {"d": "2026-10-28", "type": "earn", "title": "美股科技巨头 Q3 财报周", "note": "微软/苹果/谷歌/Meta/亚马逊约 10/28-11/7 集中披露，英伟达约 11 月下旬；具体日期以各公司 IR 为准", "src": "公司 IR 惯例窗口"},
+  {"d": "2026-10-31", "type": "cn", "title": "A 股三季报披露截止", "note": "全部上市公司季报披露完成", "src": "沪深交易所规则"},
+  {"d": "2026-12-09", "type": "fed", "title": "美联储 FOMC 利率决议", "note": "北京时间 12/10 02:00", "src": "federalreserve.gov"}
+ ]
+}

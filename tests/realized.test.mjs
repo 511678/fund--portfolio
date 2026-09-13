@@ -45,6 +45,12 @@ async function loadPage() {
         const u = String(url);
         if (u.includes("market.json")) return {ok: true, status: 200, json: async () => marketData};
         if (u.includes("funds.json")) return {ok: true, status: 200, json: async () => fundsData};
+        if (u.includes("events.json")) return {ok: true, status: 200, json: async () => ({
+          updated: "2026-09-14", events: [
+            {d: "2026-09-16", type: "fed", title: "美联储 FOMC 利率决议", note: "test"},
+            {d: "2026-10-28", type: "earn", title: "美股科技巨头 Q3 财报周", note: "test"},
+            {d: "2026-10-31", type: "cn", title: "A 股三季报披露截止", note: "test"}
+          ]})};
         throw new TypeError("network blocked in test: " + u);
       };
     },
@@ -522,4 +528,37 @@ test("待补成本引导条：未录成本时显示，点击列出清单", async
   // 全部补录后引导条消失
   window.eval(`amounts["002771"].cost = 80; lsSet(LS.amt, amounts); renderTxnView();`);
   assert.equal(doc.getElementById("costAlert").style.display, "none", "补完应隐藏");
+});
+
+/* ---------- 大事日历 ---------- */
+test("大事日历：FOMC 官方日程渲染、今天/明天徽章、规则事件生成", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.eval(`eventsCache = null;`);
+  await window.eval(`renderEvents()`);
+  const strip = doc.getElementById("evStrip").textContent;
+  assert.ok(strip.includes("美联储 FOMC 利率决议"), `应含 FOMC：${strip.slice(0, 200)}`);
+  assert.ok(strip.includes("美国非农就业报告"), "规则生成应含非农");
+  assert.ok(strip.includes("中国 LPR 报价"), "规则生成应含 LPR");
+  assert.ok(strip.includes("A 股三季报披露截止"), "应含三季报截止");
+  // 徽章：官方日程含 9/16（fixture 与当前日期同月则显示"今天/明天/N天后"之一）
+  assert.ok(/今天|明天|\d+天后|刚过/.test(strip), "应有时间徽章");
+  // 非农规则：2026 年 10 月首个周五 = 10/2
+  const oct = window.eval(`ruleEvents(2026).filter(e => e.type === "job" && e.d.startsWith("2026-10"))`);
+  assert.equal(oct[0].d, "2026-10-02", `10 月首个周五：${oct[0].d}`);
+});
+
+test("大事日历：自定义事件可添加、可删除", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  let step = 0;
+  window.prompt = () => (++step === 1 ? "2026-11-19" : step === 2 ? "英伟达财报" : "北京时间凌晨");
+  window.eval(`eventsCache = null; evAdd.onclick();`);
+  const user = window.eval(`lsGet(LS.events, [])`);
+  assert.ok(user.some(u => u.title === "英伟达财报" && u.d === "2026-11-19"), "自定义事件已存");
+  // 删除
+  window.eval(`eventsCache = null; renderEvents()`);
+  await new Promise(r => setTimeout(r, 60));   // renderEvents 异步
+  window.eval(`document.querySelector(".ev-del").click()`);
+  assert.equal(window.eval(`lsGet(LS.events, []).length`), 0, "删除后清空");
 });

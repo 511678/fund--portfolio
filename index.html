@@ -230,6 +230,26 @@
   .tabbar a.on { color:var(--s1); font-weight:600; }
   @media (max-width:720px) { .tabbar { display:flex; } }
 
+  /* ============ 大事日历（横滑卡片带） ============ */
+  .ev-strip { display:flex; gap:10px; overflow-x:auto; padding-bottom:8px;
+    scroll-snap-type:x proximity; }
+  .ev-card { position:relative; flex:0 0 auto; width:170px; scroll-snap-align:start;
+    border:1px solid var(--border); border-radius:12px; padding:10px 12px;
+    background:var(--page); }
+  .ev-card.ev-hot { border-color:var(--up); }
+  .ev-badge { position:absolute; top:8px; right:10px; font-size:11px; font-weight:650;
+    color:var(--warn-ink); background:var(--warn-bg); border-radius:999px; padding:1px 8px; }
+  .ev-card.ev-hot .ev-badge { color:#fff; background:var(--up); }
+  .ev-icon { font-size:18px; margin-bottom:4px; }
+  .ev-title { font-size:13px; font-weight:600; line-height:1.35; margin-bottom:4px;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .ev-date { font-size:11px; color:var(--ink-3); line-height:1.4;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .ev-del { position:absolute; bottom:6px; right:8px; border:none; background:none;
+    color:var(--ink-3); cursor:pointer; font-size:13px; padding:0 2px; }
+  .ev-del:hover { color:var(--up); }
+  .ev-add { float:right; }
+
   footer { color:var(--ink-3); font-size:12px; padding:18px 0 8px; text-align:center; }
 </style>
 </head>
@@ -304,6 +324,13 @@
           <h3>板块明细 · 按金额</h3>
           <div class="sector-cards" id="sectorCards"></div>
         </div>
+      </section>
+
+      <section class="card" style="margin-bottom:14px">
+        <h3>大事日历 <span style="font-weight:400" id="evSrcHint">官方日程（美联储/BLS/交易所）· 横向滑动查看</span>
+          <button class="btn b-mini ev-add" id="evAdd">＋ 添加</button></h3>
+        <div class="ev-strip" id="evStrip"></div>
+        <div class="hint">FOMC/CPI 为官方公布日期；非农=每月首个周五、LPR=每月 20 日（节假日顺延）、PMI=月末，为规则性日程；财报窗口以各公司 IR 为准。可点「＋添加」记自己的提醒。</div>
       </section>
 
       <section class="card">
@@ -502,11 +529,11 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js?v=9"></script>
+<script src="js/core.js?v=10"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v9";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v10";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -535,7 +562,7 @@ function fundMainBucket(code) {
   if (ov) return {bucket: bucketOf(ov), sub: ov + " · 手选"};
   return FP.fundMainBucket(market?.funds?.[code]?.industries, fundBucketFallback(code));
 }
-const LS = { amt:"fp_amounts", txn:"fp_txns", set:"fp_settings", cache:"fp_market_cache" };
+const LS = { amt:"fp_amounts", txn:"fp_txns", set:"fp_settings", cache:"fp_market_cache", events:"fp_events" };
 const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const lsSet = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
@@ -770,6 +797,7 @@ function renderDash() {
   if (!hasFund) { $("updBadge").textContent = market ? "更新于 " + (market.updated_at||"") : "无数据"; return; }
   const c = compute();
   lastCompute = c;
+  renderEvents();
   // 盘中实时校准今日涨跌（估值/最新净值优先于 Action 抓的净值序列）
   let pSum = 0, pW = 0, srcLive = "";
   let lastDate = "", staleCnt = 0;
@@ -1255,6 +1283,86 @@ $("btnAddTxn").onclick = () => {
   $("txnMsg").textContent = "✓ 已记账，市值/成本已更新";
   renderDash();
 };
+
+/* ================= 大事日历 ================= */
+let eventsCache = null;
+const EV_ICON = {fed:"🏦", cpi:"📈", job:"💼", cn:"🇨🇳", earn:"🏢", user:"⭐"};
+const evPad = n => String(n).padStart(2, "0");
+const evShift = (d, days) => {
+  const t = new Date(d + "T00:00:00"); t.setDate(t.getDate() + days); return todayLocal(t);
+};
+/* 规则性日程：非农=每月首个周五；LPR=每月 20 日；PMI=每月最后一天 */
+function ruleEvents(year) {
+  const ev = [];
+  for (let m = 0; m < 12; m++) {
+    const first = new Date(year, m, 1);
+    const fri = 1 + (5 - first.getDay() + 7) % 7;
+    ev.push({d: `${year}-${evPad(m+1)}-${evPad(fri)}`, type: "job",
+      title: "美国非农就业报告", note: "北京时间当晚 20:30（冬令 21:30）", src: "规则性日程"});
+    ev.push({d: `${year}-${evPad(m+1)}-20`, type: "cn",
+      title: "中国 LPR 报价", note: "每月 20 日（节假日顺延）", src: "中国人民银行"});
+    const last = new Date(year, m + 1, 0).getDate();
+    ev.push({d: `${year}-${evPad(m+1)}-${evPad(last)}`, type: "cn",
+      title: "中国官方 PMI", note: "国家统计局月末发布", src: "规则性日程"});
+  }
+  return ev;
+}
+async function loadEvents() {
+  if (eventsCache) return eventsCache;
+  let builtin = [];
+  try {
+    builtin = (await fetch("data/events.json", {cache: "no-store"}).then(r => r.json())).events || [];
+  } catch {}
+  eventsCache = {builtin, user: lsGet(LS.events, [])};
+  return eventsCache;
+}
+function dayDiff(a, b) {
+  return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 864e5);
+}
+async function renderEvents() {
+  const {builtin, user} = await loadEvents();
+  const today = todayLocal();
+  const year = +today.slice(0, 4);
+  const seen = new Set();
+  const all = [...builtin, ...ruleEvents(year), ...user.map(u => ({...u, _user: true}))]
+    .filter(e => { const k = e.d + "|" + e.title; if (seen.has(k)) return false; seen.add(k); return true; })
+    .filter(e => e.d >= evShift(today, -2) && e.d <= evShift(today, 75))
+    .sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0);
+  $("evStrip").innerHTML = all.length ? all.map(e => {
+    const diff = dayDiff(today, e.d);
+    const badge = diff === 0 ? "今天" : diff === 1 ? "明天" : diff < 0 ? "刚过" : `${diff}天后`;
+    return `<div class="ev-card ${diff >= 0 && diff <= 1 ? "ev-hot" : ""}">
+      ${e._user ? `<button class="ev-del" data-d="${esc(e.d)}" data-t="${esc(e.title)}" title="删除此提醒">×</button>` : ""}
+      <div class="ev-badge">${badge}</div>
+      <div class="ev-icon">${EV_ICON[e.type] || "📌"}</div>
+      <div class="ev-title">${esc(e.title)}</div>
+      <div class="ev-date">${esc(e.d.slice(5).replace("-", "/"))}${e.note ? " · " + esc(e.note) : ""}</div>
+    </div>`;
+  }).join("") : `<div class="hempty">近期 75 天内没有已收录的大事</div>`;
+}
+$("evAdd").onclick = () => {
+  const d = prompt("事件日期（YYYY-MM-DD，如 2026-11-19）", todayLocal());
+  if (d == null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.trim())) return toast("日期格式：YYYY-MM-DD");
+  const title = prompt("事件标题（如：英伟达财报）");
+  if (!title || !title.trim()) return;
+  const note = prompt("备注（可空，如：北京时间凌晨）", "") || "";
+  const user = lsGet(LS.events, []);
+  user.push({d: d.trim(), title: title.trim(), note: note.trim(), type: "user"});
+  lsSet(LS.events, user);
+  eventsCache = null;
+  renderEvents(); toast("已添加提醒");
+};
+document.addEventListener("click", e => {
+  const del = e.target.closest(".ev-del");
+  if (del) {
+    const user = lsGet(LS.events, []).filter(u =>
+      !(u.d === del.dataset.d && u.title === del.dataset.t));
+    lsSet(LS.events, user);
+    eventsCache = null;
+    renderEvents(); toast("已删除");
+  }
+});
 
 /* ================= GitHub 写入 ================= */
 async function ghWriteFunds(mutate) {
