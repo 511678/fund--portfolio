@@ -570,3 +570,27 @@ test("大事日历：日韩央行与龙头财报事件渲染", async () => {
   assert.ok(strip.includes("英伟达"), "应含英伟达财报（11/17 确认，在 95 天视界内）");
   assert.ok(strip.includes("微软 / 谷歌 / Meta"), "应含巨头财报周");
 });
+
+/* ---------- 走势交互数据 + 日历全年化 ---------- */
+test("走势交互：compute 暴露逐日序列供滑动查看", async () => {
+  const { window } = await loadPage();
+  window.eval(`amounts = {"020691": {amt: 3000, cost: 2800, name: "通信设备A", d: latestNavDate("020691")}};`);
+  const c = window.eval(`compute()`);
+  assert.ok(Array.isArray(c.pr) && c.pr.length >= 30, `组合日收益序列：${c.pr?.length}`);
+  assert.ok(Array.isArray(c.prDates) && c.prDates.length === c.pr.length);
+  if (c.bench) assert.equal(c.bench.dates.length, c.bench.idx.length, "基准日期与指数对齐");
+});
+
+test("日历全年化：1 月 FOMC/CPI 等历史事件可回看（视界=今年全年）", async () => {
+  const { window } = await loadPage();
+  const doc = window.document;
+  window.eval(`eventsCache = null;`);
+  await window.eval(`renderEvents()`);
+  const t = doc.getElementById("evStrip").textContent;
+  assert.ok(t.includes("美联储 FOMC 利率决议（今年第 1 次）"), "1 月 FOMC 应在（全年视界）");
+  assert.ok(t.includes("美国 12 月 CPI"), "1/13 CPI 应在");
+  assert.ok(t.includes("日本央行"), "日行事件应在");
+  // 卡片数应明显多于仅未来 95 天的窗口
+  const n = doc.querySelectorAll(".ev-card").length;
+  assert.ok(n >= 50, `全年事件卡应有 50+ 张（内置 33 + 规则 36，去重后）：${n}`);
+});

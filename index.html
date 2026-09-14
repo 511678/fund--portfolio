@@ -327,16 +327,23 @@
       </section>
 
       <section class="card" style="margin-bottom:14px">
-        <h3>大事日历 <span style="font-weight:400" id="evSrcHint">官方日程（美联储/BLS/交易所）· 横向滑动查看</span>
+        <h3>大事日历 <span style="font-weight:400" id="evSrcHint">官方日程 · 今年全年 + 未来 3 个月，横向滑动查看</span>
           <button class="btn b-mini ev-add" id="evAdd">＋ 添加</button></h3>
         <div class="ev-strip" id="evStrip"></div>
         <div class="hint">FOMC/日韩央行/CPI 为官方公布日期；非农=每月首个周五、LPR=每月 20 日（节假日顺延）、PMI=月末，为规则性日程；财报标注「预计」的以各公司 IR 为准。可点「＋添加」记自己的提醒。</div>
       </section>
 
       <section class="card">
-        <h3>组合净值走势 · 按当前持仓权重回溯，起点指数化=100</h3>
-        <svg id="trend" width="100%" viewBox="0 0 680 200" preserveAspectRatio="none"
-          role="img" aria-label="组合走势"></svg>
+        <h3>组合净值走势 · 按当前持仓权重回溯，起点指数化=100
+          <span style="font-weight:400;font-size:11px;color:var(--ink-3)">滑动/悬停查看每日</span></h3>
+        <div id="trendWrap" style="position:relative;touch-action:pan-y;cursor:crosshair">
+          <svg id="trend" width="100%" viewBox="0 0 680 200" preserveAspectRatio="none"
+            role="img" aria-label="组合走势"></svg>
+          <div id="trendTip" style="position:absolute;display:none;pointer-events:none;z-index:5;
+            background:var(--surface);border:1px solid var(--border);border-radius:8px;
+            padding:6px 9px;font-size:11px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.15);
+            white-space:nowrap"></div>
+        </div>
         <details class="tbl">
           <summary>查看数据表</summary>
           <table class="data" id="trendTable"></table>
@@ -529,11 +536,11 @@
 
 <div id="toast"></div>
 
-<script src="js/core.js?v=11"></script>
+<script src="js/core.js?v=12"></script>
 <script>
 "use strict";
 /* ================= 常量 ================= */
-const APP_VER = "v11";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
+const APP_VER = "v12";   // 每次改动 js/core.js 或主脚本时同步升版（防 Pages/浏览器缓存旧 JS）
 /* 全局错误可见化：任何未捕获错误直接显示在页面顶部徽标，便于用户报告 */
 window.addEventListener("error", e => {
   const b = document.getElementById("updBadge");
@@ -728,6 +735,7 @@ function compute() {
   }
   const dates = Object.keys(ser).sort();
   const pr = dates.map(d => ser[d][1] > 0 ? ser[d][0]/ser[d][1] : 0);  // 组合日收益%
+  out.pr = pr; out.prDates = dates;
   if (pr.length) {
     out.todayPct = pr[pr.length-1];
     let idx = 100, peak = -1e9, mdd = 0, mddD = "";
@@ -942,9 +950,16 @@ function renderDash() {
          fill="${cssv("--s1")}" opacity=".1"/>
        <polyline points="${pts}" fill="none" stroke="${cssv("--s1")}" stroke-width="2"/>
        ${benchSvg}
+       <line id="trendCross" y1="${padT}" y2="${H-padB}" stroke="${cssv("--ink-3")}"
+         stroke-dasharray="3 3" opacity="0"/>
+       <circle id="trendDotA" r="3.5" fill="${cssv("--s1")}" stroke="${cssv("--surface")}" stroke-width="1.5" opacity="0"/>
+       <circle id="trendDotB" r="3" fill="${cssv("--ink-3")}" stroke="${cssv("--surface")}" stroke-width="1.5" opacity="0"/>
        <text x="${padL}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}">${esc(t.dates[0])}</text>
        <text x="${W-padR}" y="${H-4}" font-size="10" fill="${cssv("--ink-3")}" text-anchor="end">${esc(t.dates.at(-1))}</text>
        <text x="${W-padR-4}" y="${padT+10}" font-size="10" text-anchor="end" fill="${cssv("--ink-2")}">— 组合${benchTxt ? " ｜ " + esc(benchTxt) : ""}</text>`;
+    // 交互数据（pointer 事件读取）
+    trendData = {dates: t.dates, idx: t.idx, bench: c.bench, pr: c.pr || [],
+      W, H, padL, padR, xs, ys, svg: $("trend"), tip: $("trendTip"), wrap: $("trendWrap")};
     const step = Math.ceil(t.dates.length/8);
     $("trendTable").innerHTML = "<tr><th>日期</th><th>指数</th></tr>" +
       t.dates.map((d,i) => (i%step===0 || i===t.dates.length-1)
@@ -954,6 +969,59 @@ function renderDash() {
 
 /* ================= 明细视图 ================= */
 let holdSort = "day";   // day=当日收益 | pnl=持有收益 | amt=金额（点表头循环切换）
+/* ---- 走势图逐日查看（滑动/悬停）---- */
+let trendData = null;
+function trendShow(e) {
+  if (!trendData) return;
+  const td = trendData;
+  const rect = td.wrap.getBoundingClientRect();
+  if (!rect.width) return;
+  const scale = td.W / rect.width;
+  const x = (e.clientX - rect.left) * scale;
+  const span = td.W - td.padL - td.padR;
+  const i = Math.max(0, Math.min(td.dates.length - 1,
+    Math.round((x - td.padL) / span * (td.dates.length - 1))));
+  const set = (id, attr, v) => { const el = td.svg.querySelector(id); if (el) el.setAttribute(attr, v); };
+  set("#trendCross", "x1", td.xs(i)); set("#trendCross", "x2", td.xs(i));
+  set("#trendCross", "opacity", ".6");
+  const yA = td.ys(td.idx[i]);
+  set("#trendDotA", "cx", td.xs(i)); set("#trendDotA", "cy", yA); set("#trendDotA", "opacity", "1");
+  let tip = `${td.dates[i].slice(5).replace("-", "/")} ｜ 组合 ${td.idx[i].toFixed(1)}（${td.idx[i] - 100 >= 0 ? "+" : ""}${(td.idx[i] - 100).toFixed(1)}%）`;
+  if (td.pr[i] != null) tip += ` ｜ 当日 ${td.pr[i] >= 0 ? "+" : ""}${td.pr[i].toFixed(2)}%`;
+  let yB = null;
+  if (td.bench) {
+    const bi = td.bench.dates.indexOf(td.dates[i]);
+    if (bi >= 0) {
+      yB = td.ys(td.bench.idx[bi]);
+      set("#trendDotB", "cx", td.xs(i)); set("#trendDotB", "cy", yB); set("#trendDotB", "opacity", "1");
+      tip += ` ｜ 基准 ${td.bench.idx[bi].toFixed(1)}（${td.bench.idx[bi] - 100 >= 0 ? "+" : ""}${(td.bench.idx[bi] - 100).toFixed(1)}%）`;
+    } else set("#trendDotB", "opacity", "0");
+  }
+  set("#trendDotA", "cy", yA);
+  td.tip.innerHTML = tip;
+  td.tip.style.display = "block";
+  const tipW = td.tip.offsetWidth;
+  let left = td.xs(i) / scale - tipW / 2;
+  left = Math.max(4, Math.min(left, rect.width - tipW - 4));
+  td.tip.style.left = left + "px";
+  td.tip.style.top = Math.max(2, Math.min(yA, yB ?? yA) - 44) + "px";
+}
+function trendHide() {
+  if (!trendData) return;
+  ["#trendCross", "#trendDotA", "#trendDotB"].forEach(id => {
+    const el = trendData.svg.querySelector(id); if (el) el.setAttribute("opacity", "0");
+  });
+  trendData.tip.style.display = "none";
+}
+document.addEventListener("pointermove", e => {
+  if (trendData && e.target && (e.target.id === "trend" || e.target.closest?.("#trendWrap"))) trendShow(e);
+});
+document.addEventListener("pointerdown", e => {
+  if (trendData && e.target && (e.target.id === "trend" || e.target.closest?.("#trendWrap"))) trendShow(e);
+});
+document.addEventListener("pointerleave", e => {
+  if (trendData && e.target && e.target.closest?.("#trendWrap")) trendHide();
+}, true);
 function renderHoldings() {
   const rows = Object.keys(amounts).filter(c => amounts[c].amt > 0).map(c => {
     const t = fundToday(c), mb = fundMainBucket(c);
@@ -1326,7 +1394,7 @@ async function renderEvents() {
   const seen = new Set();
   const all = [...builtin, ...ruleEvents(year), ...user.map(u => ({...u, _user: true}))]
     .filter(e => { const k = e.d + "|" + e.title; if (seen.has(k)) return false; seen.add(k); return true; })
-    .filter(e => e.d >= evShift(today, -2) && e.d <= evShift(today, 95))
+    .filter(e => e.d >= `${year}-01-01` && e.d <= evShift(today, 95))
     .sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0);
   $("evStrip").innerHTML = all.length ? all.map(e => {
     const diff = dayDiff(today, e.d);
@@ -1338,7 +1406,7 @@ async function renderEvents() {
       <div class="ev-title">${esc(e.title)}</div>
       <div class="ev-date">${esc(e.d.slice(5).replace("-", "/"))}${e.note ? " · " + esc(e.note) : ""}</div>
     </div>`;
-  }).join("") : `<div class="hempty">近期 95 天内没有已收录的大事</div>`;
+  }).join("") : `<div class="hempty">今年暂无已收录的大事</div>`;
 }
 $("evAdd").onclick = () => {
   const d = prompt("事件日期（YYYY-MM-DD，如 2026-11-19）", todayLocal());
